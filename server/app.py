@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
 import sys, os
@@ -8,6 +9,15 @@ from models import KVCacheAction, KVCacheObservation, KVCacheState, StepResult
 from server.environment import KVCacheEnvironment
 
 app = FastAPI(title="Neural PagedAttention", version="1.0.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 env = KVCacheEnvironment()
 
 
@@ -16,7 +26,8 @@ class ResetRequest(BaseModel):
 
 
 class StepRequest(BaseModel):
-    action_id: int
+    action: Optional[int] = None       # OpenEnv standard field
+    action_id: Optional[int] = None    # Legacy internal field
 
 
 @app.get("/health")
@@ -40,9 +51,10 @@ def reset(req: ResetRequest = None):
 
 @app.post("/step")
 def step(req: StepRequest):
-    if not (0 <= req.action_id <= 17):
-        raise HTTPException(status_code=400, detail="action_id must be 0-17")
-    obs, reward, done, info = env.step(req.action_id)
+    action = req.action if req.action is not None else req.action_id
+    if action is None or not (0 <= action <= 17):
+        raise HTTPException(status_code=400, detail="action must be 0-17")
+    obs, reward, done, info = env.step(action)
     return {
         "observation": obs.model_dump(),
         "reward": reward,
@@ -54,3 +66,24 @@ def step(req: StepRequest):
 @app.get("/state")
 def state():
     return env.state().model_dump()
+
+
+@app.get("/dashboard")
+def dashboard():
+    return {
+        "state": env.state().model_dump(),
+        "gpu_util": env.ledger.gpu_utilization(),
+        "cpu_util": env.ledger.cpu_utilization(),
+        "free_queue": len(env.free_queue),
+        "vip_queue": len(env.vip_queue),
+        "last_action_result": env._last_action_result,
+    }
+
+
+def main():
+    import uvicorn
+    uvicorn.run("server.app:app", host="0.0.0.0", port=7860, reload=False)
+
+
+if __name__ == "__main__":
+    main()
