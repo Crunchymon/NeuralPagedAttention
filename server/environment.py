@@ -7,7 +7,7 @@ import numpy as np
 
 # ── Hardware ──────────────────────────────────────────────────────────────
 GPU_TOTAL_BLOCKS   = 10_000   # 160,000 tokens
-CPU_TOTAL_BLOCKS   = 50_000   # 800,000 tokens
+CPU_TOTAL_BLOCKS   = 50_00   # 800,000 tokens
 TOKENS_PER_BLOCK   = 16
 
 # ── Traffic ───────────────────────────────────────────────────────────────
@@ -29,8 +29,8 @@ FREE_QUEUE_MAX     = 100
 VIP_QUEUE_MAX      = 50
 
 # ── Reward constants ──────────────────────────────────────────────────────
-FREE_MULTIPLIER    = 1.0
-VIP_MULTIPLIER     = 3.0
+FREE_MULTIPLIER    = 5.0
+VIP_MULTIPLIER     = 15.0
 LATENCY_DECAY      = 0.05
 
 # Pain receptor thresholds
@@ -48,8 +48,8 @@ PREEMPT_SWAP_FREE  = -0.6   # 40% discount vs shred
 PREEMPT_SWAP_VIP   = -1.8
 
 # Reject costs
-REJECT_UNNECESSARY_FREE = -1.5
-REJECT_UNNECESSARY_VIP  = -4.0
+REJECT_UNNECESSARY_FREE = -5.0
+REJECT_UNNECESSARY_VIP  = -10.0
 REJECT_NECESSARY_FREE   = -0.5
 REJECT_NECESSARY_VIP    = -2.0
 
@@ -58,6 +58,14 @@ SLA_MISS_FREE      = -10.0
 SLA_MISS_VIP       = -30.0
 DEADLOCK_PENALTY   = -20.0
 CRASH_PENALTY      = -100.0
+
+# DQN Reward Shaping
+INVALID_ACTION_PENALTY = -1.0
+DO_NOTHING_TAX         = -0.01
+ADMIT_BONUS            = 0.1
+EVICT_BONUS            = 0.05
+GC_BONUS               = 0.2
+ACTIVE_GEN_BONUS       = 0.02
 
 # Garbage collect idle threshold (ticks)
 GC_IDLE_THRESHOLD  = 200
@@ -293,7 +301,7 @@ class KVCacheEnvironment:
 
     def __init__(self):
         self.task: str = "easy"
-        self.config: dict = {}
+        self.config: dict = PHASE_CONFIGS[self.task]
         self.tick: int = 0
         self.episode_id: str = ""
         self.rng: random.Random = random.Random()
@@ -483,29 +491,29 @@ class KVCacheEnvironment:
             14: lambda: self._preempt_swap("free"),
             15: lambda: self._preempt_swap("vip"),
             16: lambda: self._garbage_collect(),
-            17: lambda: 0.0,  # Do Nothing
+            17: lambda: DO_NOTHING_TAX,  # Do Nothing
         }
         fn = handlers.get(action_id, lambda: 0.0)
         return fn()
 
     def _evict_idle(self, tier: str, by: str) -> float:
-        """Delete an idle GPU cache. Returns 0.0 (no direct reward)."""
+        """Delete an idle GPU cache. Returns penalty if failed."""
         candidates = self.ledger.idle_gpu_requests(tier)
         if not candidates:
             self._last_action_result = f"evict_{tier}_{by}_no_target"
-            return 0.0
+            return INVALID_ACTION_PENALTY
         target = self._pick(candidates, by)
         self.ledger.remove_from_gpu(target)
         target.location = "evicted"
         self._last_action_result = f"evicted_{tier}_{by}_{target.request_id}"
-        return 0.0
+        return EVICT_BONUS
 
     def _swap_to_cpu_idle(self, tier: str, by: str) -> float:
         """Move idle GPU cache to CPU. Returns swap tax."""
         candidates = self.ledger.idle_gpu_requests(tier)
         if not candidates:
             self._last_action_result = f"swap_{tier}_{by}_no_target"
-            return 0.0
+            return INVALID_ACTION_PENALTY
         target = self._pick(candidates, by)
         self.ledger.remove_from_gpu(target)
 
@@ -524,14 +532,14 @@ class KVCacheEnvironment:
         queue = self.free_queue if tier == "free" else self.vip_queue
         if not queue:
             self._last_action_result = f"admit_{tier}_empty_queue"
-            return 0.0
+            return INVALID_ACTION_PENALTY
 
         req = queue[0]
         blocks_needed = req.current_blocks
 
         if blocks_needed > self.ledger.gpu_free():
             self._last_action_result = f"admit_{tier}_no_gpu_space"
-            return 0.0
+            return INVALID_ACTION_PENALTY
 
         queue.pop(0)
 
@@ -550,18 +558,18 @@ class KVCacheEnvironment:
                 req = self.ledger.gpu_requests[req.request_id]
                 req.location = "gpu_active"
                 self._last_action_result = f"admitted_{tier}_cache_hit_gpu"
-                return 0.0
+                return ADMIT_BONUS
 
         self.ledger.place_on_gpu(req, location="gpu_active")
         self._last_action_result = f"admitted_{tier}_{req.request_id}"
-        return 0.0
+        return ADMIT_BONUS
 
     def _reject_next(self, tier: str) -> float:
         """Drop next queued request. Penalty depends on whether GPU has space."""
         queue = self.free_queue if tier == "free" else self.vip_queue
         if not queue:
             self._last_action_result = f"reject_{tier}_empty_queue"
-            return 0.0
+            return INVALID_ACTION_PENALTY
 
         req = queue.pop(0)
         self.total_rejected += 1
@@ -581,7 +589,7 @@ class KVCacheEnvironment:
         candidates = self.ledger.active_gpu_requests(tier)
         if not candidates:
             self._last_action_result = f"preempt_shred_{tier}_no_target"
-            return 0.0
+            return INVALID_ACTION_PENALTY
         target = self._pick(candidates, by="size")
         self.ledger.remove_from_gpu(target)
         target.location = "evicted"
@@ -594,7 +602,7 @@ class KVCacheEnvironment:
         candidates = self.ledger.active_gpu_requests(tier)
         if not candidates:
             self._last_action_result = f"preempt_swap_{tier}_no_target"
-            return 0.0
+            return INVALID_ACTION_PENALTY
         target = self._pick(candidates, by="size")
         self.ledger.remove_from_gpu(target)
         target.location = "queue"  # back to queue after CPU restore
@@ -620,11 +628,15 @@ class KVCacheEnvironment:
             r for r in self.ledger.cpu_requests.values()
             if r.tier == "free" and r.idle_ticks > GC_IDLE_THRESHOLD
         ]
+        if not to_remove:
+            self._last_action_result = "gc_removed_0_caches"
+            return INVALID_ACTION_PENALTY
+            
         for req in to_remove:
             self.ledger.remove_from_cpu(req)
             req.location = "evicted"
         self._last_action_result = f"gc_removed_{len(to_remove)}_caches"
-        return 0.0
+        return GC_BONUS
 
     def _silent_janitor(self, needed: int):
         """
@@ -668,11 +680,12 @@ class KVCacheEnvironment:
         for req in list(self.ledger.cpu_requests.values()):
             req.idle_ticks += 1
 
-        # Generate 1 token per active request
+        # Generate 15 tokens per active request to speed up simulation for the demo (50 max steps)
         completed_this_tick = []
         for req in list(self.ledger.gpu_requests.values()):
             if req.is_active:
-                req.generated_tokens += 1
+                req.generated_tokens += 5
+                reward += ACTIVE_GEN_BONUS
                 # Grow blocks if needed
                 new_blocks = req.current_blocks
                 if new_blocks > req.blocks_allocated:
@@ -710,8 +723,11 @@ class KVCacheEnvironment:
 
     def _spawn_traffic(self):
         """Generate new requests according to traffic function."""
+        if self.tick % 5 != 0:
+            return
+            
         traffic_fn = TRAFFIC_FNS[self.config["traffic_fn"]]
-        n_arrivals = traffic_fn(self.tick)
+        n_arrivals = traffic_fn(self.tick) * 5
 
         for _ in range(n_arrivals):
             req = generate_request(
