@@ -1,2 +1,26 @@
-./_pycache_
-./AGENT_INSTRUCTIONS.md
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.DS_Store
+
+# Environment secrets - NEVER commit
+.env
+
+# Inference / development scripts (not part of the environment submission)
+inference.py
+inference_dqn.py
+inference_dummy.py
+inference_free.py
+inference_given.py
+inference_hybrid.py
+my_env_v4.py
+
+# Trained model weights (too large for submission)
+weights/
+
+# Local dev visualizer (not part of env server)
+visualizer/
+
+# Misc
+AGENT_INSTRUCTIONS.md

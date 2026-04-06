@@ -1,200 +1,144 @@
-"""
-Neural PagedAttention — Baseline Inference Script
-Uses an LLM (via OpenAI client) as the agent.
-Emits mandatory [START] / [STEP] / [END] log format.
-"""
 import asyncio
 import os
-import sys
 import textwrap
-from typing import Optional
+from typing import List, Optional
 
-import httpx
 from openai import OpenAI
 
-# ── Configuration ─────────────────────────────────────────────────────────
-API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
-MODEL_NAME   = os.getenv("MODEL_NAME",   "Qwen/Qwen2.5-72B-Instruct")
-API_KEY      = os.getenv("HF_TOKEN") or os.getenv("API_KEY", "")
-ENV_URL      = os.getenv("ENV_URL",      "http://localhost:7860")
-BENCHMARK    = "neural-paged-attention"
-MAX_STEPS    = 50          # per task episode
-TEMPERATURE  = 0.0         # deterministic — required for reproducibility
-MAX_TOKENS   = 10          # we only need a single integer
+from my_env_v4 import MyEnvV4Action, MyEnvV4Env
+IMAGE_NAME = os.getenv("IMAGE_NAME") # If you are using docker image 
+API_KEY = os.getenv("HF_TOKEN") or os.getenv("API_KEY")
 
-TASKS = ["easy", "medium", "hard"]
+API_BASE_URL = os.getenv("API_BASE_URL") or "https://router.huggingface.co/v1"
+MODEL_NAME = os.getenv("MODEL_NAME") or "Qwen/Qwen2.5-72B-Instruct"
+TASK_NAME = os.getenv("MY_ENV_V4_TASK", "echo")
+BENCHMARK = os.getenv("MY_ENV_V4_BENCHMARK", "my_env_v4")
+MAX_STEPS = 8
+TEMPERATURE = 0.7
+MAX_TOKENS = 150
+SUCCESS_SCORE_THRESHOLD = 0.1  # normalized score in [0, 1]
 
-ACTION_DESCRIPTIONS = """
-0  = Evict Largest Free cache (idle GPU only)
-1  = Evict Largest VIP cache  (idle GPU only)
-2  = Evict Oldest Free cache  (idle GPU only)
-3  = Evict Oldest VIP cache   (idle GPU only)
-4  = Swap Largest Free cache GPU→CPU
-5  = Swap Largest VIP cache  GPU→CPU
-6  = Swap Oldest Free cache  GPU→CPU
-7  = Swap Oldest VIP cache   GPU→CPU
-8  = Admit next Free user from queue
-9  = Admit next VIP user from queue
-10 = Reject next Free user (penalty if GPU has space)
-11 = Reject next VIP user  (penalty if GPU has space)
-12 = Preempt & Shred Largest Active Free request
-13 = Preempt & Shred Largest Active VIP request
-14 = Preempt & Swap Largest Active Free → CPU
-15 = Preempt & Swap Largest Active VIP → CPU
-16 = Garbage Collect (delete idle Free CPU caches > 200 ticks)
-17 = Do Nothing
-"""
+# Max possible reward: each token contributes 0.1, across all steps
+_MAX_REWARD_PER_STEP = MAX_TOKENS * 0.1
+MAX_TOTAL_REWARD = MAX_STEPS * _MAX_REWARD_PER_STEP
 
-SYSTEM_PROMPT = textwrap.dedent(f"""
-You are an AI memory manager for a GPU running LLM inference.
-Your job is to keep the GPU utilization high without crashing.
-VIP users are 3x more valuable than Free users.
-You must respond with ONLY a single integer from 0 to 17.
-No explanation. No punctuation. Just the integer.
-
-Available actions:
-{ACTION_DESCRIPTIONS}
-""").strip()
+SYSTEM_PROMPT = textwrap.dedent(
+    """
+    You are interacting with a simple echo environment.
+    Each turn you must send a message. The environment will echo it back.
+    Reward is proportional to message length: reward = len(message) * 0.1
+    Your goal is to maximize total reward by sending meaningful, substantive messages.
+    Reply with exactly one message string — no quotes, no prefixes, just the message text.
+    """
+).strip()
 
 
-# ── Logging ───────────────────────────────────────────────────────────────
-def log_start(task: str, model: str):
-    print(f"[START] task={task} env={BENCHMARK} model={model}", flush=True)
+def log_start(task: str, env: str, model: str) -> None:
+    print(f"[START] task={task} env={env} model={model}", flush=True)
 
-def log_step(step: int, action: str, reward: float, done: bool, error: Optional[str]):
-    err = error if error else "null"
-    print(f"[STEP] step={step} action={action} reward={reward:.2f} done={str(done).lower()} error={err}", flush=True)
 
-def log_end(success: bool, steps: int, score: float, rewards: list[float]):
+def log_step(step: int, action: str, reward: float, done: bool, error: Optional[str]) -> None:
+    error_val = error if error else "null"
+    done_val = str(done).lower()
+    print(
+        f"[STEP] step={step} action={action} reward={reward:.2f} done={done_val} error={error_val}",
+        flush=True,
+    )
+
+
+def log_end(success: bool, steps: int, score: float, rewards: List[float]) -> None:
     rewards_str = ",".join(f"{r:.2f}" for r in rewards)
     print(f"[END] success={str(success).lower()} steps={steps} score={score:.3f} rewards={rewards_str}", flush=True)
 
 
-# ── LLM Action Selection ──────────────────────────────────────────────────
-def get_action(client: OpenAI, obs: dict, step: int) -> int:
-    """
-    Ask the LLM to choose an action given the current observation.
-    Parses the integer from the response.
-    Falls back to action 17 (Do Nothing) on any failure.
-    """
-    user_prompt = textwrap.dedent(f"""
-    Step {step}. Current GPU state:
-    - GPU utilization: {obs['gpu_utilization_pct']:.2f} (0=empty, 1=full)
-    - CPU utilization: {obs['cpu_utilization_pct']:.2f}
-    - Memory trend:    {obs['memory_pressure_trend']:.2f} (+rising, -falling)
-    - Free queue:      {obs['free_queue_pressure']:.2f} of capacity
-    - VIP queue:       {obs['vip_queue_pressure']:.2f} of capacity
-    - Free SLA risk:   {obs['free_max_wait_time_pct']:.2f} (1.0 = timeout imminent)
-    - VIP SLA risk:    {obs['vip_max_wait_time_pct']:.2f} (1.0 = timeout imminent)
-    - Largest active:  {obs['yield_preempt_active']:.2f} of GPU
-    - Largest free cache: {obs['free_size_max']:.2f}
-    - Largest VIP cache:  {obs['vip_size_max']:.2f}
-    - Oldest free idle:   {obs['free_age_max']:.2f}
-    - Oldest VIP idle:    {obs['vip_age_max']:.2f}
+def build_user_prompt(step: int, last_echoed: str, last_reward: float, history: List[str]) -> str:
+    history_block = "\n".join(history[-4:]) if history else "None"
+    return textwrap.dedent(
+        f"""
+        Step: {step}
+        Last echoed message: {last_echoed!r}
+        Last reward: {last_reward:.2f}
+        Previous steps:
+        {history_block}
+        Send your next message.
+        """
+    ).strip()
 
-    Choose one action (0-17). Reply with only the integer.
-    """).strip()
 
+def get_model_message(client: OpenAI, step: int, last_echoed: str, last_reward: float, history: List[str]) -> str:
+    user_prompt = build_user_prompt(step, last_echoed, last_reward, history)
     try:
-        resp = client.chat.completions.create(
+        completion = client.chat.completions.create(
             model=MODEL_NAME,
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user",   "content": user_prompt},
+                {"role": "user", "content": user_prompt},
             ],
             temperature=TEMPERATURE,
             max_tokens=MAX_TOKENS,
+            stream=False,
         )
-        text = (resp.choices[0].message.content or "").strip()
-        action_id = int(text.split()[0])
-        if 0 <= action_id <= 17:
-            return action_id
-        return 17  # fallback
-    except Exception:
-        return 17  # fallback: Do Nothing
+        text = (completion.choices[0].message.content or "").strip()
+        return text if text else "hello"
+    except Exception as exc:
+        print(f"[DEBUG] Model request failed: {exc}", flush=True)
+        return "hello"
 
 
-# ── Environment HTTP client ───────────────────────────────────────────────
-def env_reset(task: str) -> dict:
-    r = httpx.post(f"{ENV_URL}/reset", json={"task": task}, timeout=30)
-    r.raise_for_status()
-    return r.json()
+async def main() -> None:
+    client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
 
-def env_step(action_id: int) -> dict:
-    r = httpx.post(f"{ENV_URL}/step", json={"action_id": action_id}, timeout=30)
-    r.raise_for_status()
-    return r.json()
+    env = await MyEnvV4Env.from_docker_image(IMAGE_NAME)
 
-def env_state() -> dict:
-    r = httpx.get(f"{ENV_URL}/state", timeout=30)
-    r.raise_for_status()
-    return r.json()
-
-
-# ── Episode Runner ────────────────────────────────────────────────────────
-def run_episode(client: OpenAI, task: str) -> float:
-    log_start(task=task, model=MODEL_NAME)
-
-    rewards: list[float] = []
+    history: List[str] = []
+    rewards: List[float] = []
     steps_taken = 0
     score = 0.0
     success = False
-    error_msg = None
+
+    log_start(task=TASK_NAME, env=BENCHMARK, model=MODEL_NAME)
 
     try:
-        result = env_reset(task)
-        obs    = result["observation"]
-        done   = result["done"]
+        result = await env.reset() # OpenENV.reset()
+        last_echoed = result.observation.echoed_message
+        last_reward = 0.0
 
         for step in range(1, MAX_STEPS + 1):
-            if done:
+            if result.done:
                 break
 
-            action_id = get_action(client, obs, step)
+            message = get_model_message(client, step, last_echoed, last_reward, history)
 
-            try:
-                result   = env_step(action_id)
-                obs      = result["observation"]
-                reward   = float(result["reward"])
-                done     = result["done"]
-                info     = result.get("info", {})
-                error_msg = info.get("action_result") if "error" in info else None
-            except Exception as e:
-                reward   = 0.0
-                done     = True
-                error_msg = str(e)
+            result = await env.step(MyEnvV4Action(message=message))
+            obs = result.observation
+
+            reward = result.reward or 0.0
+            done = result.done
+            error = None
 
             rewards.append(reward)
             steps_taken = step
-            log_step(step=step, action=str(action_id), reward=reward,
-                     done=done, error=error_msg)
+            last_echoed = obs.echoed_message
+            last_reward = reward
 
-        # Get final score from state
-        state  = env_state()
-        score  = float(state.get("current_score", 0.0))
-        success = score > 0.1
+            log_step(step=step, action=message, reward=reward, done=done, error=error)
 
-    except Exception as e:
-        error_msg = str(e)
-        print(f"[DEBUG] Episode error: {e}", flush=True)
+            history.append(f"Step {step}: {message!r} -> reward {reward:+.2f}")
+
+            if done:
+                break
+
+        score = sum(rewards) / MAX_TOTAL_REWARD if MAX_TOTAL_REWARD > 0 else 0.0
+        score = min(max(score, 0.0), 1.0)  # clamp to [0, 1]
+        success = score >= SUCCESS_SCORE_THRESHOLD
+
     finally:
+        try:
+            await env.close()
+        except Exception as e:
+            print(f"[DEBUG] env.close() error (container cleanup): {e}", flush=True)
         log_end(success=success, steps=steps_taken, score=score, rewards=rewards)
-
-    return score
-
-
-# ── Main ──────────────────────────────────────────────────────────────────
-def main():
-    client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
-
-    all_scores = []
-    for task in TASKS:
-        score = run_episode(client, task)
-        all_scores.append(score)
-        print(f"[DEBUG] Task={task} Score={score:.3f}", flush=True)
-
-    print(f"[DEBUG] Mean score across tasks: {sum(all_scores)/len(all_scores):.3f}", flush=True)
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "neural-paged-attention"
+version = "1.0.0"
+description = "A high-fidelity RL environment simulating GPU KV Cache management for LLM inference servers."
+authors = [{ name = "Team Neural PagedAttention" }]
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "httpx",
+    "numpy",
+    "python-dotenv",
+    "openai",
+    "pydantic",
+    "openenv-core",
+]
+
+[project.scripts]
+server = "server.app:main"
+
+[tool.openenv]
+name = "neural-paged-attention"
+version = "1.0.0"
+tasks = ["easy", "medium", "hard"]
