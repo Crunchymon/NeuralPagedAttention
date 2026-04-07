@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
@@ -67,6 +67,47 @@ def step(req: StepRequest):
 def state():
     return env.state().model_dump()
 
+
+@app.get("/metadata")
+def metadata():
+    return {
+        "name": "neural-paged-attention",
+        "description": "RL environment simulating GPU KV Cache management for LLM inference servers.",
+        "tasks": ["easy", "medium", "hard"],
+        "version": "1.0.0",
+        "observation_space": {"type": "array", "shape": [20], "dtype": "float32"},
+        "action_space": {"type": "discrete", "n": 18},
+        "reward_range": [-100.0, 3.0],
+    }
+
+
+@app.get("/schema")
+def schema():
+    from models import KVCacheAction, KVCacheObservation, KVCacheState
+    return {
+        "action":      KVCacheAction.model_json_schema(),
+        "observation": KVCacheObservation.model_json_schema(),
+        "state":       KVCacheState.model_json_schema(),
+    }
+
+
+@app.post("/mcp")
+async def mcp(request: Request):
+    body = {}
+    try:
+        body = await request.json()
+    except Exception:
+        pass
+    req_id = body.get("id") if isinstance(body, dict) else None
+    return {
+        "jsonrpc": "2.0",
+        "id": req_id,
+        "result": {
+            "name": "neural-paged-attention",
+            "description": "KV Cache GPU memory manager",
+            "capabilities": {"reset": True, "step": True, "state": True},
+        },
+    }
 
 @app.get("/dashboard")
 def dashboard():
