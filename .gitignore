@@ -24,3 +24,4 @@ visualizer/
 
 # Misc
 AGENT_INSTRUCTIONS.md
+test_agent.py
