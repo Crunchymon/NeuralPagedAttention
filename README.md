@@ -1,3 +1,13 @@
+---
+title: Neural Paged Attention
+emoji: 🚀
+colorFrom: blue
+colorTo: purple
+sdk: gradio
+sdk_version: "4.36.1"
+app_file: app.py
+pinned: false
+---
 # Neural PagedAttention
 
 RL environment for training AI agents to manage GPU KV Cache in LLM inference servers.
