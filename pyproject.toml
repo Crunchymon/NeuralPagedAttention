@@ -12,6 +12,8 @@ dependencies = [
     "fastapi",
     "uvicorn",
     "httpx",
+    "gradio",
+    "pandas",
     "numpy",
     "python-dotenv",
     "openai",

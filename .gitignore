@@ -1,26 +1,49 @@
-# Python
+# Python cache
 __pycache__/
 *.py[cod]
 *.pyo
+
+# OS
 .DS_Store
 
-# Environment secrets - NEVER commit
+# Secrets (critical)
 .env
+.env.*
 
-# Inference / development scripts (not part of the environment submission)
-inference.py
-inference_dqn.py
-inference_dummy.py
-inference_free.py
-inference_given.py
-inference_hybrid.py
+# Logs
+*.log
 
-# Trained model weights (too large for submission)
+# Virtual envs
+.venv/
+venv/
+env/
+
+# Inference / local experiments (not for submission)
+inference*.py
+test_agent.py
+
+# Large artifacts
 weights/
+*.pt
+*.bin
+*.ckpt
+*.safetensors
 
-# Local dev visualizer (not part of env server)
+# Local tools / UI
 visualizer/
 
-# Misc
+# Docs not needed for runtime
 AGENT_INSTRUCTIONS.md
-test_agent.py
+
+# Build / packaging
+build/
+dist/
+*.egg-info/
+
+# Testing / coverage
+.pytest_cache/
+.coverage
+
+# Server cache (explicit safety)
+server/__pycache__/
+server/env_components/__pycache__/
