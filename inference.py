@@ -142,12 +142,13 @@ def get_action(client: OpenAI, obs: dict, step: int) -> int:
 
     user_prompt = textwrap.dedent(f"""
     Step {step} — Current state:
-    - GPU util:      {obs['gpu_utilization_pct']:.2f}
-    - CPU util:      {obs['cpu_utilization_pct']:.2f}
-    - Free queue:    {obs['free_queue_pressure']:.2f}
-    - VIP queue:     {obs['vip_queue_pressure']:.2f}
-    - Free SLA risk: {obs['free_max_wait_time_pct']:.2f}
-    - VIP SLA risk:  {obs['vip_max_wait_time_pct']:.2f}
+    - GPU util:        {obs['gpu_utilization_pct']:.2f}
+    - CPU util:        {obs['cpu_utilization_pct']:.2f}
+    - Free queue reqs: {obs['total_free_req']:.0f}
+    - VIP queue reqs:  {obs['total_vip_req']:.0f}
+    - Total queue reqs:{obs['total_req']:.0f}
+    - Free SLA risk:   {obs['free_max_wait_time_pct']:.2f}
+    - VIP SLA risk:    {obs['vip_max_wait_time_pct']:.2f}
 
     Choose action (0-17):
     """).strip()

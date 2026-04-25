@@ -249,4 +249,4 @@ def run_sim(task=None, ticks=None):
 
 if __name__ == "__main__":
     task_arg = sys.argv[1] if len(sys.argv) > 1 else None
-    run_sim(task=task_arg, episodes=30)
+    run_sim(task=task_arg)
