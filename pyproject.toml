@@ -9,16 +9,20 @@ description = "A high-fidelity RL environment simulating GPU KV Cache management
 authors = [{ name = "Team Neural PagedAttention" }]
 requires-python = ">=3.10"
 dependencies = [
-    "fastapi",
-    "uvicorn",
-    "httpx",
-    "gradio",
-    "pandas",
-    "numpy",
-    "python-dotenv",
-    "openai",
-    "pydantic",
-    "openenv-core",
+    "fastapi>=0.111.0",
+    "uvicorn>=0.29.0",
+    "httpx>=0.27.0",
+    "gradio>=4.36.1",
+    "pandas>=2.0.0",
+    "numpy>=1.26.4",
+    "python-dotenv>=1.0.1",
+    "openai>=1.30.1",
+    "pydantic>=2.7.1",
+    "openenv-core>=0.2.3",
+    "requests>=2.31.0",
+    "transformers>=4.35.2",
+    "accelerate>=0.24.1",
+    "torch>=2.0.0",
 ]
 
 [project.scripts]

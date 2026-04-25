@@ -9,6 +9,6 @@ python-dotenv>=1.0.1
 requests>=2.31.0
 transformers>=4.35.2
 accelerate>=0.24.1
-gradio
-pandas
-accelerate
+gradio>=4.36.1
+pandas>=2.0.0
+openenv-core>=0.2.3
