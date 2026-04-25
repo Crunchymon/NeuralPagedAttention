@@ -185,7 +185,7 @@ def run_sim(task=None, ticks=None):
             action = agent.select_action(obs)
             action_name = ACTION_MAP.get(action, "Unknown")
 
-            next_obs, reward, done, _ = env.step(action)
+            next_obs, reward, done, info = env.step(action)
             if next_obs is None: break
 
             agent.memory.push(obs, action, reward, next_obs, done)
@@ -200,6 +200,9 @@ def run_sim(task=None, ticks=None):
                 "reward": round(reward, 2),
                 "score": round(total_reward + reward, 2),
                 "episode": 1,
+                "tick_prompt_tokens": info.get("tick_prompt_tokens", 0),
+                "tick_gen_tokens": info.get("tick_gen_tokens", 0),
+                "tick_max_tokens": info.get("tick_max_tokens", 0),
                 **obs_dict
             }
             logs.append(log_entry)

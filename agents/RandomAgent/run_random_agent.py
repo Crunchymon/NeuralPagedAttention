@@ -127,6 +127,9 @@ def run_simulation(task=None, ticks=None):
                 "action": action_name,
                 "reward": round(reward, 2),
                 "score": round(total_reward, 2),
+                "tick_prompt_tokens": info.get("tick_prompt_tokens", 0),
+                "tick_gen_tokens": info.get("tick_gen_tokens", 0),
+                "tick_max_tokens": info.get("tick_max_tokens", 0),
                 **current_state_dict
             }
             logs.append(log_entry)

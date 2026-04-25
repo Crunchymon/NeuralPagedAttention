@@ -53,6 +53,11 @@ class KVCacheEnvironment:
         self._returning_pool: list[str] = []
         self._last_action_result: str = "none"
 
+        # Per-tick token stats (reset each _spawn_traffic call)
+        self.tick_prompt_tokens: int = 0
+        self.tick_gen_tokens: int = 0
+        self.tick_max_tokens: int = 0
+
     def reset(self, task: str = "easy") -> "KVCacheObservation":
         assert task in PHASE_CONFIGS, f"Unknown task: {task}"
         self.task = task
@@ -80,6 +85,10 @@ class KVCacheEnvironment:
         self._gpu_history = []
         self._returning_pool = []
         self._last_action_result = "reset"
+
+        self.tick_prompt_tokens = 0
+        self.tick_gen_tokens = 0
+        self.tick_max_tokens = 0
 
         self._spawn_traffic()
         return self._build_observation()
@@ -118,6 +127,9 @@ class KVCacheEnvironment:
             "tick": self.tick,
             "gpu_util": self.ledger.gpu_utilization(),
             "sla_penalty": sla_penalty,
+            "tick_prompt_tokens": self.tick_prompt_tokens,
+            "tick_gen_tokens": self.tick_gen_tokens,
+            "tick_max_tokens": self.tick_max_tokens,
         }
 
         return self._build_observation(), reward, self.done, info
@@ -146,6 +158,11 @@ class KVCacheEnvironment:
         if self.tick % 5 != 0:
             return
 
+        # Reset per-tick token counters for this batch
+        self.tick_prompt_tokens = 0
+        self.tick_gen_tokens = 0
+        self.tick_max_tokens = 0
+
         traffic_fn = TRAFFIC_FNS[self.config["traffic_fn"]]
         n_arrivals = traffic_fn(self.tick) * 5
 
@@ -158,6 +175,12 @@ class KVCacheEnvironment:
                 rng=self.rng,
             )
             self.total_arrived += 1
+
+            # Accumulate token stats
+            max_tokens = int(constants.GPU_TOTAL_BLOCKS * 0.8 * constants.TOKENS_PER_BLOCK)
+            self.tick_prompt_tokens += req.prompt_tokens
+            self.tick_gen_tokens += req.target_gen_tokens
+            self.tick_max_tokens += max_tokens
 
             if req.tier == "vip":
                 if len(self.vip_queue) < VIP_QUEUE_MAX:

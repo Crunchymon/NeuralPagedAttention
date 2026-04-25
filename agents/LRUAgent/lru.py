@@ -147,6 +147,9 @@ def run_sim(task=None, ticks=None):
                 "action": action_name,
                 "reward": round(reward, 2),
                 "score": round(total_reward, 2),
+                "tick_prompt_tokens": info.get("tick_prompt_tokens", 0),
+                "tick_gen_tokens": info.get("tick_gen_tokens", 0),
+                "tick_max_tokens": info.get("tick_max_tokens", 0),
                 **obs_dict
             }
 
