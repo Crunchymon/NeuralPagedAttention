@@ -49,6 +49,10 @@ class RemoteEnv:
         # Nothing needed for local env
         pass
 
+    def admit_batch(self, tier: str, pct: float) -> float:
+        """Batch-admit pct% of the tier queue based on GPU space."""
+        return self.env.admit_batch(tier, pct)
+
 
 # ---------------- AGENT ---------------- #
 
@@ -56,7 +60,16 @@ class RandomAgent:
     def __init__(self, action_size=18):
         self.action_size = action_size
 
-    def select_action(self, state):
+    def select_action(self, state, env: "RemoteEnv" = None):
+        """Pick a random action. Before that, randomly admit a pct of both queues."""
+        if env is not None:
+            pct = random.uniform(0.1, 1.0)  # random 10%-100% of each queue
+            free_q = state[3]               # total_free_req
+            vip_q  = state[4]               # total_vip_req
+            if vip_q > 0:
+                env.admit_batch("vip", pct)
+            if free_q > 0:
+                env.admit_batch("free", pct)
         return random.randint(0, self.action_size - 1)
 
 
@@ -109,7 +122,7 @@ def run_simulation(task=None, ticks=None):
 
         while not done:
             current_state_dict = dict(zip(keys, obs))
-            action = agent.select_action(obs)
+            action = agent.select_action(obs, env=env)
             action_name = ACTION_MAP.get(action, f"Unknown({action})")
 
             obs, reward, done, info = env.step(action)

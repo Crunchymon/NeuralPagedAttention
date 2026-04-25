@@ -100,6 +100,36 @@ def _admit_next(env, tier: str) -> float:
     return ADMIT_BONUS
 
 
+def admit_batch(env, tier: str, pct: float) -> float:
+    """Admit up to pct% of the queue, limited by available GPU blocks.
+    Returns cumulative reward from all individual admissions."""
+    pct = max(0.0, min(1.0, pct))
+    queue = env.free_queue if tier == "free" else env.vip_queue
+    if not queue:
+        return INVALID_ACTION_PENALTY
+
+    n_to_admit = max(1, round(len(queue) * pct))
+    total_reward = 0.0
+    admitted = 0
+
+    for _ in range(n_to_admit):
+        queue = env.free_queue if tier == "free" else env.vip_queue
+        if not queue:
+            break
+        req = queue[0]
+        if req.current_blocks > env.ledger.gpu_free():
+            break  # No more GPU space
+        total_reward += _admit_next(env, tier)
+        admitted += 1
+
+    if admitted == 0:
+        env._last_action_result = f"admit_batch_{tier}_no_gpu_space"
+        return INVALID_ACTION_PENALTY
+
+    env._last_action_result = f"admit_batch_{tier}_{admitted}_of_{n_to_admit}"
+    return total_reward
+
+
 def _reject_next(env, tier: str) -> float:
     queue = env.free_queue if tier == "free" else env.vip_queue
     if not queue:

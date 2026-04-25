@@ -2,7 +2,7 @@ import random
 import uuid
 
 from models import KVCacheObservation, KVCacheState
-from server.env_components.action_executor import execute_action
+from server.env_components.action_executor import execute_action, admit_batch as _admit_batch_fn
 from server.env_components.constants import (
     CRASH_PENALTY,
     FREE_QUEUE_MAX,
@@ -153,6 +153,10 @@ class KVCacheEnvironment:
 
     def _tick_forward(self) -> float:
         return tick_forward(self)
+
+    def admit_batch(self, tier: str, pct: float) -> float:
+        """Admit up to pct% of the tier queue subject to GPU availability."""
+        return _admit_batch_fn(self, tier, pct)
 
     def _spawn_traffic(self):
         if self.tick % 5 != 0:

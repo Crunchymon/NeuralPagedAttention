@@ -37,43 +37,52 @@ class LocalEnv:
             print(f"[!] Step Error: {e}")
             return None, 0, True, {}
 
+    def admit_batch(self, tier: str, pct: float) -> float:
+        """Batch-admit pct% of the tier queue based on GPU space."""
+        return self.env.admit_batch(tier, pct)
+
+    def gpu_free_pct(self) -> float:
+        """Return fraction of GPU blocks currently free."""
+        import server.env_components.constants as constants
+        gpu_total = constants.GPU_TOTAL_BLOCKS
+        gpu_used = self.env.ledger.gpu_used
+        return max(0.0, (gpu_total - gpu_used) / gpu_total)
+
 
 # ---------------- AGENT ---------------- #
 
 class LRUAgent:
     """
     Least Recently Used (Age-based) Heuristic Agent.
+    Admission is batch-based: admits GPU-free-pct% of both queues each step.
     """
 
-    def select_action(self, obs):
+    def select_action(self, obs, env: "LocalEnv" = None):
         gpu_util = obs[0]
-        free_q = obs[3]
-        vip_q = obs[4]
+        free_q   = obs[3]   # total_free_req (raw count)
+        vip_q    = obs[4]   # total_vip_req
         free_age = obs[14]
-        vip_age = obs[17]
+        vip_age  = obs[17]
 
-        # 1. Admit if safe
-        if gpu_util < 0.85:
+        # --- Batch admit proportional to GPU free space ---
+        if env is not None and (free_q > 0 or vip_q > 0) and gpu_util < 0.85:
+            admit_pct = env.gpu_free_pct()          # e.g. 0.40 → admit 40% of queue
             if vip_q > 0:
-                return 9  # admit_vip
+                env.admit_batch("vip", admit_pct)
             if free_q > 0:
-                return 8  # admit_free
+                env.admit_batch("free", admit_pct)
+            # Fall through to normal housekeeping action
 
-        # 2. LRU eviction under pressure
+        # --- LRU eviction under pressure ---
         if gpu_util > 0.90:
             if vip_age >= free_age and vip_age > 0:
-                return 3  # evict_oldest_vip
+                return 3   # evict_oldest_vip
             elif free_age > 0:
-                return 2  # evict_oldest_free
-            
-            # CRITICAL FALLBACK: If GPU is > 95% and NO idle caches exist,
-            # active requests are expanding and will crash the GPU!
+                return 2   # evict_oldest_free
             if gpu_util > 0.95:
-                return 14 # Preempt & Swap Largest Active Free -> CPU
-            
-            return 16  # garbage_collect (Action 16)
+                return 14  # preempt_swap_largest_free -> CPU
+            return 16      # garbage_collect
 
-        # 3. Idle
         return 17  # do_nothing
 
 
@@ -128,7 +137,7 @@ def run_sim(task=None, ticks=None):
         done = False
         logs = []
         while not done:
-            action = agent.select_action(obs)
+            action = agent.select_action(obs, env=env)
             action_name = ACTION_MAP.get(action, "Unknown")
 
             obs, reward, done, info = env.step(action)
