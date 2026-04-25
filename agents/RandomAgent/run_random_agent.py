@@ -112,8 +112,8 @@ def run_simulation(task=None, ticks=None):
         if ticks is not None:
             env.env.config["max_ticks"] = ticks
         if obs is None:
-            print("[!] Environment error. Aborting.")
-            return
+            print(f"[!] Reset failed for task '{current_task}', skipping.")
+            continue
 
         total_reward = 0
         ticks_run = 0

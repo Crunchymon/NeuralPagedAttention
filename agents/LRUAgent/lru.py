@@ -180,7 +180,8 @@ def run_sim(task=None, ticks=None):
             env.env.config["max_ticks"] = ticks
         
         if obs is None:
-            break
+            print(f"[!] Reset failed for task '{current_task}', skipping.")
+            continue
 
         total_reward = 0
         ticks_run = 0
@@ -192,6 +193,7 @@ def run_sim(task=None, ticks=None):
 
             obs, reward, done, info = env.step(action)
             if obs is None:
+                done = True
                 break
 
             total_reward += reward

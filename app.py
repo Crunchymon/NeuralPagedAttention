@@ -124,10 +124,10 @@ def update_settings(req: SettingsRequest):
             "CPU_TOTAL_BLOCKS": 5000,
             "TOKENS_PER_BLOCK": 16,
             "max_ticks_easy": 2000,
-            "max_ticks_medium": 5000,
-            "max_ticks_hard": 10000
+            "max_ticks_medium": 3000,
+            "max_ticks_hard": 5000
         }
-    }
+    }   
 
 @app.post(
     "/api/simulate",
