@@ -29,6 +29,31 @@ class SimulationRequest(BaseModel):
     agent: str = Field(..., description="The name of the agent to run. Must be either 'lru', 'random', 'qlearning', or 'neural'.")
     task: Optional[str] = Field(None, description="The task difficulty to simulate. Options: 'easy', 'medium', 'hard'. If omitted, all tasks will be run sequentially.")
 
+@app.get(
+    "/api/agents",
+    tags=["simulation"],
+    summary="List available agents",
+    description="Returns a list of all supported reinforcement learning and heuristic agents, along with instructions on how to use them."
+)
+def get_agents():
+    return {
+        "status": "success",
+        "available_agents": [
+            {"id": "lru", "name": "Least Recently Used (LRU)", "description": "Heuristic agent that evicts the least recently used cache."},
+            {"id": "random", "name": "Random Agent", "description": "Baseline agent that selects actions entirely at random."},
+            {"id": "qlearning", "name": "Tabular Q-Learning Agent", "description": "RL agent using a discretized state-space Q-table."},
+            {"id": "neural", "name": "Deep Q-Network (DQN) Agent", "description": "RL agent using a PyTorch neural network to map continuous states to Q-values."}
+        ],
+        "usage": {
+            "endpoint": "POST /api/simulate",
+            "example_payload": {
+                "agent": "neural",
+                "task": "hard"
+            },
+            "description": "Send a POST request to /api/simulate with the desired agent ID and task difficulty ('easy', 'medium', or 'hard')."
+        }
+    }
+
 @app.post(
     "/api/simulate",
     tags=["simulation"],
