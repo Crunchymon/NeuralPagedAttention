@@ -1,885 +1,181 @@
-openapi: "3.1.0"
-
+openapi: 3.1.0
 info:
-  title: NeuralPagedAttention Benchmark API
-  version: "2.0.0"
-  description: |
-    Session-based RL benchmark for KV-cache eviction policy evaluation.
-
-    ## Quickstart
-    1. `POST /sessions` — create a session, receive `session_id`
-    2. `POST /sessions/{session_id}/reset` — start an episode
-    3. `POST /sessions/{session_id}/step` — advance one tick
-    4. `GET  /sessions/{session_id}/state` — poll without stepping
-    5. `DELETE /sessions/{session_id}` — clean up
-
-    ## Session TTL
-    Sessions expire after **inactivity**, not wall-clock age.
-    Every /reset, /step, /state, /render, /score call resets the timer.
-    Default inactivity TTL: 600 s (10 min). Configurable per session.
-
-    ## Action space (18 discrete actions)
-    | ID | Name |
-    |----|------|
-    | 0  | evict_largest_free |
-    | 1  | evict_largest_vip |
-    | 2  | evict_oldest_free |
-    | 3  | evict_oldest_vip |
-    | 4  | swap_largest_free_to_cpu |
-    | 5  | swap_largest_vip_to_cpu |
-    | 6  | swap_oldest_free_to_cpu |
-    | 7  | swap_oldest_vip_to_cpu |
-    | 8  | admit_next_free |
-    | 9  | admit_next_vip |
-    | 10 | reject_next_free |
-    | 11 | reject_next_vip |
-    | 12 | preempt_shred_free |
-    | 13 | preempt_shred_vip |
-    | 14 | preempt_swap_free |
-    | 15 | preempt_swap_vip |
-    | 16 | garbage_collect |
-    | 17 | do_nothing |
-
-    ## Observation vector (20 dims, normalized)
-    | Idx | Feature |
-    |-----|---------|
-    | 0   | gpu_utilization_pct |
-    | 1   | cpu_utilization_pct |
-    | 2   | memory_pressure_trend |
-    | 3   | free_queue_pressure |
-    | 4   | vip_queue_pressure |
-    | 5   | free_max_wait_time_pct |
-    | 6   | vip_max_wait_time_pct |
-    | 7   | yield_preempt_active |
-    | 8   | free_size_max |
-    | 9   | free_size_mean |
-    | 10  | free_size_std_dev |
-    | 11  | vip_size_max |
-    | 12  | vip_size_mean |
-    | 13  | vip_size_std_dev |
-    | 14  | free_age_max |
-    | 15  | free_age_mean |
-    | 16  | free_age_std_dev |
-    | 17  | vip_age_max |
-    | 18  | vip_age_mean |
-    | 19  | vip_age_std_dev |
-
-# ── Dashboard / monitoring values exposed for visualisation tools ──────────────
-x-environment-config:
-  session:
-    max_sessions: 100                 # NPA_MAX_SESSIONS
-    default_inactivity_ttl_seconds: 600  # NPA_INACTIVITY_TTL — resets on every API call
-    cleanup_interval_seconds: 60      # NPA_CLEANUP_INTERVAL
-
-  hardware:
-    gpu_total_blocks: 1000            # NPA_GPU_TOTAL_BLOCKS
-    cpu_total_blocks: 5000            # NPA_CPU_TOTAL_BLOCKS
-    tokens_per_block: 16
-
-  queue_limits:
-    free_queue_max: 100
-    vip_queue_max: 50
-
-  phase_configs:
-    easy:
-      max_ticks: 2000
-      requests_per_tick: 1            # traffic_flat: constant 1 req/tick
-      vip_ratio: 0.02
-      power_user_pct: 0.0
-      traffic_fn: flat
-      sla_free: null
-      sla_vip: null
-    medium:
-      max_ticks: 5000
-      requests_per_tick: 2            # traffic_wave: avg ~2 req/tick
-      vip_ratio: 0.05
-      power_user_pct: 0.20
-      traffic_fn: wave
-      sla_free: 100
-      sla_vip: 50
-    hard:
-      max_ticks: 10000
-      requests_per_tick: 4            # traffic_spike: avg ~4 req/tick
-      vip_ratio: 0.10
-      power_user_pct: 0.35
-      traffic_fn: spike
-      sla_free: 50
-      sla_vip: 25
-
-  reward_shaping:
-    crash_penalty: -100.0
-    sla_miss_free: -10.0
-    sla_miss_vip: -30.0
-    deadlock_penalty: -20.0
-    admit_bonus: 0.1
-    evict_bonus: 0.05
-    gc_bonus: 0.2
-    do_nothing_tax: -0.01
-    swap_tax_free: -0.2
-    swap_tax_vip: -0.5
-    preempt_shred_free: -1.0
-    preempt_shred_vip: -3.0
-    preempt_swap_free: -0.6
-    preempt_swap_vip: -1.8
-    reject_unnecessary_free: -5.0
-    reject_unnecessary_vip: -10.0
-    reject_necessary_free: -0.5
-    reject_necessary_vip: -2.0
-    pain_95_threshold_penalty: -0.1
-    pain_98_threshold_penalty: -0.4
-
-servers:
-  - url: http://localhost:7860
-    description: Local development (also HuggingFace Spaces port)
-
-tags:
-  - name: sessions
-    description: Session lifecycle — create, list, get, delete
-  - name: environment
-    description: Environment interaction — reset, step, state, render
-  - name: benchmark
-    description: Scoring and dashboard endpoints
-  - name: health
-    description: Server health, metadata, and schemas
-  - name: legacy
-    description: Deprecated global-env endpoints (kept for backward compatibility)
-
+  title: Neural PagedAttention Backend API
+  version: 0.1.0
 paths:
-
-  # ── Health ──────────────────────────────────────────────────────────────────
-
-  /health:
-    get:
-      tags: [health]
-      summary: Server health check
-      operationId: healthCheck
-      responses:
-        "200":
-          description: Server is healthy
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/HealthResponse"
-
-  /info:
-    get:
-      tags: [health]
-      summary: Environment metadata and dashboard config
-      description: |
-        Returns action space, observation vector, phase configs, reward shaping
-        constants, and session limits. Mirrors x-environment-config above.
-        Use this endpoint to configure dashboard visualisations.
-      operationId: envInfo
-      responses:
-        "200":
-          description: Environment metadata
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/EnvInfoResponse"
-
-  /metadata:
-    get:
-      tags: [health]
-      summary: OpenEnv-compatible manifest (legacy)
-      operationId: envMetadata
-      responses:
-        "200":
-          description: OpenEnv metadata
-          content:
-            application/json:
-              schema:
-                type: object
-
-  /schema:
-    get:
-      tags: [health]
-      summary: JSON schemas for Pydantic models
-      operationId: envSchema
-      responses:
-        "200":
-          description: JSON schemas
-          content:
-            application/json:
-              schema:
-                type: object
-
-  # ── Sessions ────────────────────────────────────────────────────────────────
-
-  /sessions:
+  /api/simulate:
     post:
-      tags: [sessions]
-      summary: Create a new isolated agent session
-      description: |
-        Allocates an isolated environment instance. Returns a `session_id` UUID.
-        The inactivity timer starts immediately and resets on every /reset,
-        /step, /state, /render, or /score call.
-      operationId: createSession
+      tags:
+      - simulation
+      summary: Run a full batch simulation
+      description: "Triggers a headless background simulation of the Neural PagedAttention\
+        \ environment using the specified agent policy.\n    \n    This endpoint executes\
+        \ the entire episode(s) and returns a comprehensive telemetry package containing:\n\
+        \    - `session_logs`: High-level episodic summaries including normalized\
+        \ scores and crash flags.\n    - `tick_logs`: Granular, tick-by-tick telemetry\
+        \ including rewards, actions, and 20-dimensional observation vectors.\n  \
+        \  \n    Multiple simulations can be requested concurrently without interference."
+      operationId: run_simulation_endpoint_api_simulate_post
       requestBody:
-        required: false
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/CreateSessionRequest"
-      responses:
-        "201":
-          description: Session created
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/SessionCreatedResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "429":
-          $ref: "#/components/responses/TooManySessions"
-
-    get:
-      tags: [sessions]
-      summary: List all active sessions
-      operationId: listSessions
-      responses:
-        "200":
-          description: Active session summaries
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  sessions:
-                    type: array
-                    items:
-                      $ref: "#/components/schemas/SessionSummary"
-                  total:
-                    type: integer
-
-  /sessions/{session_id}:
-    parameters:
-      - $ref: "#/components/parameters/SessionId"
-    get:
-      tags: [sessions]
-      summary: Get session metadata
-      operationId: getSession
-      responses:
-        "200":
-          description: Session metadata
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/SessionSummary"
-        "404":
-          $ref: "#/components/responses/SessionNotFound"
-    delete:
-      tags: [sessions]
-      summary: Terminate and clean up a session
-      operationId: deleteSession
-      responses:
-        "200":
-          description: Session terminated
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/DeleteSessionResponse"
-        "404":
-          $ref: "#/components/responses/SessionNotFound"
-
-  # ── Environment interaction ──────────────────────────────────────────────────
-
-  /sessions/{session_id}/reset:
-    parameters:
-      - $ref: "#/components/parameters/SessionId"
-    post:
-      tags: [environment]
-      summary: Reset environment — start a new episode
-      description: |
-        Resets state, queues, and reward accumulators.
-        Returns the initial observation. **Refreshes the inactivity timer.**
-      operationId: resetEnv
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/ResetRequest"
-      responses:
-        "200":
-          description: Episode started; initial observation returned
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ResetResponse"
-        "404":
-          $ref: "#/components/responses/SessionNotFound"
-
-  /sessions/{session_id}/step:
-    parameters:
-      - $ref: "#/components/parameters/SessionId"
-    post:
-      tags: [environment]
-      summary: Apply an action and advance one timestep
-      description: |
-        Executes the action, advances tick, spawns traffic, computes reward.
-        **Refreshes the inactivity timer.**
-        Call /reset before the first step.
-      operationId: stepEnv
-      requestBody:
+              $ref: '#/components/schemas/SimulationRequest'
         required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/StepRequest"
       responses:
-        "200":
-          description: Timestep result
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/StepResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "404":
-          $ref: "#/components/responses/SessionNotFound"
-
-  /sessions/{session_id}/state:
-    parameters:
-      - $ref: "#/components/parameters/SessionId"
-    get:
-      tags: [environment]
-      summary: Poll current observation without stepping
-      description: |
-        Returns the current observation and episode metadata.
-        Safe to call multiple times. **Refreshes the inactivity timer.**
-      operationId: getState
-      responses:
-        "200":
-          description: Current environment state
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/StateResponse"
-        "404":
-          $ref: "#/components/responses/SessionNotFound"
-
-  /sessions/{session_id}/render:
-    parameters:
-      - $ref: "#/components/parameters/SessionId"
-    get:
-      tags: [environment]
-      summary: Human-readable text rendering of current state
-      description: |
-        Returns a text summary suitable for feeding into an LLM agent as context.
-        **Refreshes the inactivity timer.**
-      operationId: renderState
-      responses:
-        "200":
-          description: Text rendering
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/RenderResponse"
-        "404":
-          $ref: "#/components/responses/SessionNotFound"
-
-  # ── Benchmark / scoring ──────────────────────────────────────────────────────
-
-  /sessions/{session_id}/score:
-    parameters:
-      - $ref: "#/components/parameters/SessionId"
-    get:
-      tags: [benchmark]
-      summary: Current episode score breakdown
-      description: Returns live score metrics. **Refreshes the inactivity timer.**
-      operationId: getScore
-      responses:
-        "200":
-          description: Score breakdown
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ScoreResponse"
-        "404":
-          $ref: "#/components/responses/SessionNotFound"
-
-  /sessions/{session_id}/dashboard:
-    parameters:
-      - $ref: "#/components/parameters/SessionId"
-    get:
-      tags: [benchmark]
-      summary: Per-session live dashboard snapshot
-      description: |
-        Detailed snapshot for dashboard visualisation: state, observation,
-        memory layout, queue sizes, TTL countdown.
-        **Refreshes the inactivity timer.**
-      operationId: sessionDashboard
-      responses:
-        "200":
-          description: Dashboard snapshot
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/SessionDashboardResponse"
-        "404":
-          $ref: "#/components/responses/SessionNotFound"
-
-  /dashboard:
-    get:
-      tags: [benchmark]
-      summary: Global aggregate dashboard across all sessions
-      description: |
-        Cross-session aggregate: mean GPU/CPU utilisation, total request
-        throughput, active session count. Use this to drive server-level
-        monitoring panels.
-      operationId: globalDashboard
-      responses:
-        "200":
-          description: Global dashboard aggregate
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/GlobalDashboardResponse"
-
-  # ── Legacy (deprecated) ──────────────────────────────────────────────────────
-
+                $ref: '#/components/schemas/HTTPValidationError'
   /reset:
     post:
-      tags: [legacy]
-      summary: "[DEPRECATED] Reset global env"
-      deprecated: true
-      description: Use `POST /sessions/{session_id}/reset` instead.
-      operationId: legacyReset
+      tags:
+      - legacy
+      summary: '[DEPRECATED] Reset global env'
+      description: '**Deprecated.** Use ``POST /sessions/{session_id}/reset`` instead.'
+      operationId: legacy_reset_reset_post
       requestBody:
-        required: false
         content:
           application/json:
             schema:
-              type: object
-              properties:
-                task:
-                  type: string
-                  enum: [easy, medium, hard]
+              $ref: '#/components/schemas/_LegacyResetRequest'
+              default:
+                task: easy
       responses:
-        "200":
-          description: Reset result (with Deprecation header)
-
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      deprecated: true
   /step:
     post:
-      tags: [legacy]
-      summary: "[DEPRECATED] Step global env"
-      deprecated: true
-      description: Use `POST /sessions/{session_id}/step` instead.
-      operationId: legacyStep
+      tags:
+      - legacy
+      summary: '[DEPRECATED] Step global env'
+      description: '**Deprecated.** Use ``POST /sessions/{session_id}/step`` instead.'
+      operationId: legacy_step_step_post
       requestBody:
-        required: true
         content:
           application/json:
             schema:
-              type: object
-              properties:
-                action:
-                  type: integer
-                  minimum: 0
-                  maximum: 17
+              $ref: '#/components/schemas/_LegacyStepRequest'
+        required: true
       responses:
-        "200":
-          description: Step result (with Deprecation header)
-
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      deprecated: true
   /state:
     get:
-      tags: [legacy]
-      summary: "[DEPRECATED] Get global env state"
-      deprecated: true
-      description: Use `GET /sessions/{session_id}/state` instead.
-      operationId: legacyState
+      tags:
+      - legacy
+      summary: '[DEPRECATED] Get global env state'
+      description: '**Deprecated.** Use ``GET /sessions/{session_id}/state`` instead.'
+      operationId: legacy_state_state_get
       responses:
-        "200":
-          description: State (with Deprecation header)
-
-
-# ── Components ─────────────────────────────────────────────────────────────────
-
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+      deprecated: true
 components:
-
-  parameters:
-    SessionId:
-      name: session_id
-      in: path
-      required: true
-      schema:
-        type: string
-        format: uuid
-      description: Session UUID returned from POST /sessions
-
-  responses:
-    SessionNotFound:
-      description: Session does not exist or has expired due to inactivity
-      content:
-        application/json:
-          schema:
-            $ref: "#/components/schemas/ErrorResponse"
-    TooManySessions:
-      description: Server session limit reached
-      content:
-        application/json:
-          schema:
-            $ref: "#/components/schemas/ErrorResponse"
-    BadRequest:
-      description: Invalid request body or parameters
-      content:
-        application/json:
-          schema:
-            $ref: "#/components/schemas/ErrorResponse"
-
   schemas:
-
-    # ── Primitives ─────────────────────────────────────────────────────────────
-
-    ObservationDict:
-      type: object
-      description: |
-        Named 20-dimensional observation vector (all values normalized).
-        Fields match KVCacheObservation pydantic model exactly.
+    HTTPValidationError:
       properties:
-        gpu_utilization_pct:      { type: number, minimum: 0, maximum: 1 }
-        cpu_utilization_pct:      { type: number, minimum: 0, maximum: 1 }
-        memory_pressure_trend:    { type: number, minimum: -1, maximum: 1 }
-        free_queue_pressure:      { type: number, minimum: 0, maximum: 1 }
-        vip_queue_pressure:       { type: number, minimum: 0, maximum: 1 }
-        free_max_wait_time_pct:   { type: number, minimum: 0, maximum: 1 }
-        vip_max_wait_time_pct:    { type: number, minimum: 0, maximum: 1 }
-        yield_preempt_active:     { type: number, minimum: 0, maximum: 1 }
-        free_size_max:            { type: number, minimum: 0, maximum: 1 }
-        free_size_mean:           { type: number, minimum: 0, maximum: 1 }
-        free_size_std_dev:        { type: number, minimum: 0, maximum: 1 }
-        vip_size_max:             { type: number, minimum: 0, maximum: 1 }
-        vip_size_mean:            { type: number, minimum: 0, maximum: 1 }
-        vip_size_std_dev:         { type: number, minimum: 0, maximum: 1 }
-        free_age_max:             { type: number, minimum: 0, maximum: 1 }
-        free_age_mean:            { type: number, minimum: 0, maximum: 1 }
-        free_age_std_dev:         { type: number, minimum: 0, maximum: 1 }
-        vip_age_max:              { type: number, minimum: 0, maximum: 1 }
-        vip_age_mean:             { type: number, minimum: 0, maximum: 1 }
-        vip_age_std_dev:          { type: number, minimum: 0, maximum: 1 }
-
-    # ── Health ─────────────────────────────────────────────────────────────────
-
-    HealthResponse:
+        detail:
+          items:
+            $ref: '#/components/schemas/ValidationError'
+          type: array
+          title: Detail
       type: object
+      title: HTTPValidationError
+    SimulationRequest:
       properties:
-        status:
+        agent:
           type: string
-          enum: [ok, degraded]
-        active_sessions:
-          type: integer
-          description: Number of non-expired sessions currently held
-        max_sessions:
-          type: integer
-        uptime_seconds:
-          type: number
-        inactivity_ttl_default_seconds:
-          type: integer
-          description: Default TTL applied to new sessions (from NPA_INACTIVITY_TTL)
-
-    EnvInfoResponse:
-      type: object
-      properties:
-        observation_dim:   { type: integer, example: 20 }
-        action_space_size: { type: integer, example: 18 }
-        action_descriptions:
-          type: object
-          additionalProperties: { type: string }
-        phase_configs:
-          type: object
-          additionalProperties: { type: object }
-        hardware:
-          type: object
-          properties:
-            gpu_total_blocks: { type: integer }
-            cpu_total_blocks: { type: integer }
-        queue_limits:
-          type: object
-          properties:
-            free_queue_max: { type: integer }
-            vip_queue_max:  { type: integer }
-        reward_bounds:
-          type: object
-          properties:
-            min: { type: number }
-            max: { type: number }
-        reward_shaping:
-          type: object
-          additionalProperties: { type: number }
-        session:
-          type: object
-          properties:
-            max_sessions: { type: integer }
-            default_inactivity_ttl_seconds: { type: integer }
-
-    # ── Sessions ───────────────────────────────────────────────────────────────
-
-    CreateSessionRequest:
-      type: object
-      properties:
-        agent_id:
-          type: string
-          nullable: true
-          description: Human-readable agent identifier for leaderboard attribution
-          example: "ppo-agent-v3"
+          title: Agent
+          description: The name of the agent to run. Must be either 'lru' or 'random'.
         task:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Task
+          description: 'The task difficulty to simulate. Options: ''easy'', ''medium'',
+            ''hard''. If omitted, all tasks will be run sequentially.'
+      type: object
+      required:
+      - agent
+      title: SimulationRequest
+    ValidationError:
+      properties:
+        loc:
+          items:
+            anyOf:
+            - type: string
+            - type: integer
+          type: array
+          title: Location
+        msg:
           type: string
-          enum: [easy, medium, hard]
+          title: Message
+        type:
+          type: string
+          title: Error Type
+        input:
+          title: Input
+        ctx:
+          type: object
+          title: Context
+      type: object
+      required:
+      - loc
+      - msg
+      - type
+      title: ValidationError
+    _LegacyResetRequest:
+      properties:
+        task:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Task
           default: easy
-          description: Initial task difficulty
-        inactivity_ttl_seconds:
-          type: integer
-          minimum: 60
-          maximum: 86400
-          default: 600
-          description: |
-            Seconds of silence before auto-expiry. Timer resets on every
-            /reset, /step, /state, /render, /score call.
-            Minimum: 60 s. Maximum: 86400 s (24 h). Default: 600 s (10 min).
-
-    SessionCreatedResponse:
       type: object
-      required: [session_id, created_at, expires_after_inactivity_seconds]
-      properties:
-        session_id:
-          type: string
-          format: uuid
-        agent_id:
-          type: string
-          nullable: true
-        created_at:
-          type: string
-          format: date-time
-        expires_after_inactivity_seconds:
-          type: integer
-          description: Inactivity timeout for this session
-        status:
-          type: string
-          enum: [idle, running]
-        message:
-          type: string
-          description: Human-readable next-step hint
-
-    SessionSummary:
-      type: object
-      properties:
-        session_id:
-          type: string
-          format: uuid
-        agent_id:
-          type: string
-          nullable: true
-        created_at:
-          type: string
-          format: date-time
-        expires_at:
-          type: string
-          format: date-time
-          description: Projected expiry time based on current inactivity
-        inactivity_ttl_seconds:
-          type: integer
-        inactive_for_seconds:
-          type: number
-          description: Seconds since last interaction
-        status:
-          type: string
-          enum: [idle, running]
-        episodes_completed:
-          type: integer
-        current_task:
-          type: string
-        current_tick:
-          type: integer
-
-    DeleteSessionResponse:
-      type: object
-      properties:
-        session_id:     { type: string }
-        terminated:     { type: boolean }
-        episodes_completed: { type: integer }
-        final_score:    { type: number, nullable: true }
-
-    # ── Reset / Step ───────────────────────────────────────────────────────────
-
-    ResetRequest:
-      type: object
-      properties:
-        task:
-          type: string
-          enum: [easy, medium, hard]
-          nullable: true
-          description: Override task difficulty for this episode only
-
-    ResetResponse:
-      type: object
-      required: [session_id, observation, done]
-      properties:
-        session_id:  { type: string }
-        observation:
-          $ref: "#/components/schemas/ObservationDict"
-        reward:      { type: number, example: 0.0 }
-        done:        { type: boolean, example: false }
-        info:
-          type: object
-          properties:
-            task:        { type: string }
-            episode_id:  { type: string }
-            tick:        { type: integer, example: 0 }
-            max_ticks:   { type: integer }
-
-    StepRequest:
-      type: object
-      required: [action]
+      title: _LegacyResetRequest
+    _LegacyStepRequest:
       properties:
         action:
-          type: integer
-          minimum: 0
-          maximum: 17
-          description: Discrete action ID (0–17)
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Action
         action_id:
-          type: integer
-          minimum: 0
-          maximum: 17
-          description: "[DEPRECATED] Alias for action. Use action instead."
-          deprecated: true
-
-    StepResponse:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Action Id
       type: object
-      required: [session_id, observation, reward, done]
-      properties:
-        session_id:  { type: string }
-        observation:
-          $ref: "#/components/schemas/ObservationDict"
-        reward:
-          type: number
-          description: Raw reward for this timestep
-        done:
-          type: boolean
-          description: True if episode ended (call /reset to start a new one)
-        info:
-          type: object
-          properties:
-            action:        { type: integer }
-            action_result: { type: string }
-            tick:          { type: integer }
-            gpu_util:      { type: number }
-            sla_penalty:   { type: number }
-
-    # ── State / Render ─────────────────────────────────────────────────────────
-
-    StateResponse:
-      type: object
-      properties:
-        session_id:      { type: string }
-        observation:
-          $ref: "#/components/schemas/ObservationDict"
-        state:           { type: object }
-        gpu_util:        { type: number }
-        cpu_util:        { type: number }
-        free_queue_len:  { type: integer }
-        vip_queue_len:   { type: integer }
-
-    RenderResponse:
-      type: object
-      properties:
-        session_id:  { type: string }
-        text:
-          type: string
-          description: |
-            Human-readable state summary. Example:
-            "Tick 142/2000. Task: EASY. GPU: 81% full. CPU: 31% full.
-             Free queue: 12 requests. VIP queue: 3 requests.
-             Completed: 245/389. Score: 0.6301. Last action: admitted_free_a3f2b1."
-        structured:
-          $ref: "#/components/schemas/ObservationDict"
-
-    # ── Scoring / Dashboard ────────────────────────────────────────────────────
-
-    ScoreResponse:
-      type: object
-      properties:
-        session_id:        { type: string }
-        episode_id:        { type: string }
-        task:              { type: string }
-        tick:              { type: integer }
-        max_ticks:         { type: integer }
-        cumulative_reward: { type: number }
-        current_score:     { type: number }
-        total_arrived:     { type: integer }
-        total_completed:   { type: integer }
-        total_rejected:    { type: integer }
-        crashed:           { type: boolean }
-        gpu_utilization:   { type: number }
-        cpu_utilization:   { type: number }
-
-    SessionDashboardResponse:
-      type: object
-      description: |
-        Per-session snapshot for dashboard panels.
-        Includes TTL countdown so dashboards can warn before session expires.
-      properties:
-        session_id:         { type: string }
-        agent_id:           { type: string, nullable: true }
-        status:             { type: string, enum: [idle, running] }
-        episodes_completed: { type: integer }
-        expires_in_seconds:
-          type: number
-          description: Seconds until inactivity expiry (countdown for dashboard)
-        state:              { type: object }
-        observation:
-          $ref: "#/components/schemas/ObservationDict"
-        memory:
-          type: object
-          properties:
-            gpu_util:         { type: number }
-            cpu_util:         { type: number }
-            gpu_used_blocks:  { type: integer }
-            cpu_used_blocks:  { type: integer }
-        queues:
-          type: object
-          properties:
-            free_queue_len: { type: integer }
-            vip_queue_len:  { type: integer }
-        last_action_result: { type: string }
-
-    GlobalDashboardResponse:
-      type: object
-      description: |
-        Cross-session aggregate for server-level monitoring panels.
-        All values are computed live from non-expired sessions.
-      properties:
-        active_sessions:  { type: integer }
-        max_sessions:     { type: integer }
-        uptime_seconds:   { type: number }
-        aggregate:
-          type: object
-          properties:
-            mean_gpu_utilization:
-              type: number
-              description: Mean GPU utilisation across all active sessions
-            mean_cpu_utilization:
-              type: number
-            total_requests_arrived:
-              type: integer
-              description: Sum of total_arrived across all active sessions
-            total_requests_completed:
-              type: integer
-            global_completion_rate:
-              type: number
-              description: total_completed / total_arrived across all sessions
-        sessions:
-          type: array
-          items:
-            $ref: "#/components/schemas/SessionSummary"
-
-    ErrorResponse:
-      type: object
-      required: [error, detail]
-      properties:
-        error:
-          type: string
-          example: "session_not_found"
-        detail:
-          type: string
-          example: "Session abc-123 does not exist or expired after 600s of inactivity."
+      title: _LegacyStepRequest

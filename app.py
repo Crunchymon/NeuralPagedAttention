@@ -1,7 +1,7 @@
 import uvicorn
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional
 from fastapi.middleware.cors import CORSMiddleware
 import sys
@@ -24,10 +24,23 @@ app.add_middleware(
 )
 
 class SimulationRequest(BaseModel):
-    agent: str
-    task: Optional[str] = None
+    agent: str = Field(..., description="The name of the agent to run. Must be either 'lru' or 'random'.")
+    task: Optional[str] = Field(None, description="The task difficulty to simulate. Options: 'easy', 'medium', 'hard'. If omitted, all tasks will be run sequentially.")
 
-@app.post("/api/simulate")
+@app.post(
+    "/api/simulate",
+    tags=["simulation"],
+    summary="Run a full batch simulation",
+    description="""
+    Triggers a headless background simulation of the Neural PagedAttention environment using the specified agent policy.
+    
+    This endpoint executes the entire episode(s) and returns a comprehensive telemetry package containing:
+    - `session_logs`: High-level episodic summaries including normalized scores and crash flags.
+    - `tick_logs`: Granular, tick-by-tick telemetry including rewards, actions, and 20-dimensional observation vectors.
+    
+    Multiple simulations can be requested concurrently without interference.
+    """
+)
 def run_simulation_endpoint(req: SimulationRequest):
     agent_type = req.agent.lower()
     
