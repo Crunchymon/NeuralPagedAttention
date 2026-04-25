@@ -53,37 +53,87 @@ class LocalEnv:
 
 class LRUAgent:
     """
-    Least Recently Used (Age-based) Heuristic Agent.
-    Admission is batch-based: admits GPU-free-pct% of both queues each step.
+    Optimized LRU Heuristic Agent.
+
+    Decision priority:
+      1. Batch-admit from queues proportional to free GPU space (< 85%)
+      2. At 85-90%: swap oldest idle caches to CPU + GC stale CPU caches
+      3. At 90-95%: aggressively evict oldest idle GPU caches (LRU)
+      4. At 95%+:   preempt & swap largest active requests to CPU
+      5. Do-nothing only when GPU < 70% and queues are empty
     """
 
     def select_action(self, obs, env: "LocalEnv" = None):
-        gpu_util = obs[0]
-        free_q   = obs[3]   # total_free_req (raw count)
-        vip_q    = obs[4]   # total_vip_req
-        free_age = obs[14]
-        vip_age  = obs[17]
+        gpu_util  = obs[0]   # GPU utilization [0-1]
+        cpu_util  = obs[1]   # CPU utilization [0-1]
+        free_q    = obs[3]   # total_free_req  (raw count)
+        vip_q     = obs[4]   # total_vip_req   (raw count)
+        free_wait = obs[6]   # free_max_wait_time_pct
+        vip_wait  = obs[7]   # vip_max_wait_time_pct
+        free_age  = obs[14]  # free_age_max (oldest idle free on GPU)
+        vip_age   = obs[17]  # vip_age_max  (oldest idle vip on GPU)
 
-        # --- Batch admit proportional to GPU free space ---
-        if env is not None and (free_q > 0 or vip_q > 0) and gpu_util < 0.85:
-            admit_pct = env.gpu_free_pct()          # e.g. 0.40 → admit 40% of queue
+        # ── TIER 0: Batch admit if GPU has headroom ────────────────────────
+        if env is not None and gpu_util < 0.85 and (vip_q > 0 or free_q > 0):
+            admit_pct = env.gpu_free_pct()
             if vip_q > 0:
                 env.admit_batch("vip", admit_pct)
             if free_q > 0:
                 env.admit_batch("free", admit_pct)
-            # Fall through to normal housekeeping action
+            # Fall through to housekeeping below
 
-        # --- LRU eviction under pressure ---
+        # ── TIER 1: Critical — preempt active requests to CPU (95%+) ───────
+        if gpu_util > 0.95:
+            # Prefer to preempt-swap free (lower priority) over VIP
+            return 14  # Preempt & Swap Largest Active Free -> CPU
+
+        # ── TIER 2: High pressure — evict + swap idle caches (90-95%) ──────
         if gpu_util > 0.90:
-            if vip_age >= free_age and vip_age > 0:
-                return 3   # evict_oldest_vip
-            elif free_age > 0:
-                return 2   # evict_oldest_free
-            if gpu_util > 0.95:
-                return 14  # preempt_swap_largest_free -> CPU
-            return 16      # garbage_collect
+            # Evict oldest idle cache by LRU (age wins over size here)
+            if vip_age > 0 and vip_age >= free_age:
+                return 3   # Evict Oldest VIP (idle GPU)
+            if free_age > 0:
+                return 2   # Evict Oldest Free (idle GPU)
+            # No idle caches — swap largest active free to CPU
+            return 14      # Preempt & Swap Largest Active Free -> CPU
 
-        return 17  # do_nothing
+        # ── TIER 3: Medium pressure — offload to CPU (85-90%) ──────────────
+        if gpu_util > 0.85:
+            # Swap oldest idle caches to CPU (preserves KV cache for returning users)
+            if free_age > 0 and cpu_util < 0.80:
+                return 6   # Swap Oldest Free cache GPU->CPU
+            if vip_age > 0 and cpu_util < 0.80:
+                return 7   # Swap Oldest VIP cache GPU->CPU
+            # CPU also filling up — GC stale CPU caches first
+            if cpu_util >= 0.80:
+                return 16  # Garbage Collect (idle CPU caches >200 ticks)
+            # Nothing idle on GPU either — preempt smallest active free
+            return 14      # Preempt & Swap Largest Active Free -> CPU
+
+        # ── TIER 4: Low-medium (70-85%) — proactive CPU GC + SLA triage ───
+        if gpu_util > 0.70:
+            # GC stale CPU caches to keep swap space available
+            if cpu_util > 0.60:
+                return 16  # Garbage Collect
+            # Swap oldest idle free to CPU to reclaim GPU blocks
+            if free_age > 0 and cpu_util < 0.70:
+                return 6   # Swap Oldest Free GPU->CPU
+            # Urgently admit VIP waiting too long
+            if vip_wait > 0.5 and vip_q > 0:
+                return 9   # Admit next VIP
+            return 17      # Truly idle — do nothing
+
+        # ── TIER 5: GPU comfortably free (< 70%) ───────────────────────────
+        # GC CPU if getting cluttered
+        if cpu_util > 0.50:
+            return 16      # Garbage Collect
+        # Admit stragglers if any remain in queue after batch
+        if vip_q > 0:
+            return 9       # Admit VIP
+        if free_q > 0:
+            return 8       # Admit Free
+        return 17          # Genuinely idle
+
 
 
 # ---------------- RUN ---------------- #

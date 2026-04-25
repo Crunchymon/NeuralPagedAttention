@@ -73,7 +73,7 @@ PHASE_CONFIGS = {
         "power_user_pct": 0.0,
     },
     "medium": {
-        "max_ticks": 5000,
+        "max_ticks": 3000,
         "vip_ratio": 0.05,
         "sla_free": 100,
         "sla_vip": 50,
@@ -81,7 +81,7 @@ PHASE_CONFIGS = {
         "power_user_pct": 0.20,
     },
     "hard": {
-        "max_ticks": 10000,
+        "max_ticks": 5000,
         "vip_ratio": 0.10,
         "sla_free": 50,
         "sla_vip": 25,
