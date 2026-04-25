@@ -66,3 +66,26 @@ class StepResult(BaseModel):
     reward: float
     done: bool
     info: dict
+
+
+# Add this to the bottom of models.py
+ACTION_MAP = {
+    0:  "Evict Largest Free cache (idle GPU only)",
+    1:  "Evict Largest VIP cache (idle GPU only)",
+    2:  "Evict Oldest Free cache (idle GPU only)",
+    3:  "Evict Oldest VIP cache (idle GPU only)",
+    4:  "Swap Largest Free cache GPU->CPU",
+    5:  "Swap Largest VIP cache GPU->CPU",
+    6:  "Swap Oldest Free cache GPU->CPU",
+    7:  "Swap Oldest VIP cache GPU->CPU",
+    8:  "Admit next Free user from queue",
+    9:  "Admit next VIP user from queue",
+    10: "Reject next Free user (penalty if GPU has space)",
+    11: "Reject next VIP user (penalty if GPU has space)",
+    12: "Preempt & Shred Largest Active Free request",
+    13: "Preempt & Shred Largest Active VIP request",
+    14: "Preempt & Swap Largest Active Free -> CPU",
+    15: "Preempt & Swap Largest Active VIP -> CPU",
+    16: "Garbage Collect (delete idle CPU caches > 200 ticks)",
+    17: "Do Nothing"
+}
