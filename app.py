@@ -12,6 +12,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 from agents.LRUAgent.lru import run_sim as run_lru
 from agents.RandomAgent.run_random_agent import run_simulation as run_random
+from agents.QLearningAgent.QAgent import run_sim as run_qlearning
 
 app = FastAPI(title="Neural PagedAttention Backend API")
 
@@ -24,7 +25,7 @@ app.add_middleware(
 )
 
 class SimulationRequest(BaseModel):
-    agent: str = Field(..., description="The name of the agent to run. Must be either 'lru' or 'random'.")
+    agent: str = Field(..., description="The name of the agent to run. Must be either 'lru', 'random', or 'qlearning'.")
     task: Optional[str] = Field(None, description="The task difficulty to simulate. Options: 'easy', 'medium', 'hard'. If omitted, all tasks will be run sequentially.")
 
 @app.post(
@@ -49,8 +50,10 @@ def run_simulation_endpoint(req: SimulationRequest):
             tick_logs, session_logs = run_lru(task=req.task)
         elif agent_type == "random":
             tick_logs, session_logs = run_random(task=req.task)
+        elif agent_type == "qlearning":
+            tick_logs, session_logs = run_qlearning(task=req.task, episodes=30)
         else:
-            raise HTTPException(status_code=400, detail=f"Unknown agent type: {req.agent}. Supported: 'lru', 'random'.")
+            raise HTTPException(status_code=400, detail=f"Unknown agent type: {req.agent}. Supported: 'lru', 'random', 'qlearning'.")
             
         return {
             "status": "success",
