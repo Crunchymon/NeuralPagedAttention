@@ -66,14 +66,28 @@ class OptimizedQLearningAgent:
             1 if obs[14] > 0 else 0,
         )
 
+    def _init_state(self, state):
+        """
+        Pessimistic initialization to prevent the agent from picking suicidal
+        actions just because their Q-value is 0. We gently bias it towards
+        admitting and doing nothing first.
+        """
+        if state not in self.q_table:
+            # Initialize all to very negative so untried actions aren't favored
+            q = np.full(self.action_size, -10000.0)
+            # Give a slight optimistic boost to normal operations (Admit, Do Nothing)
+            q[8] = -5000.0  # Admit Free
+            q[9] = -5000.0  # Admit VIP
+            q[17] = -5000.0 # Do Nothing
+            self.q_table[state] = q
+
     def select_action(self, obs):
         state = self.discretize(obs)
 
         if random.random() < self.epsilon:
             return random.randint(0, self.action_size - 1)
 
-        if state not in self.q_table:
-            self.q_table[state] = np.zeros(self.action_size)
+        self._init_state(state)
 
         return int(np.argmax(self.q_table[state]))
 
@@ -92,11 +106,8 @@ class OptimizedQLearningAgent:
             state = self.discretize(obs)
             next_state = self.discretize(next_obs)
 
-            if state not in self.q_table:
-                self.q_table[state] = np.zeros(self.action_size)
-
-            if next_state not in self.q_table:
-                self.q_table[next_state] = np.zeros(self.action_size)
+            self._init_state(state)
+            self._init_state(next_state)
 
             # REMOVED CLIPPING: Let the agent feel the full -1000 crash penalties!
             
