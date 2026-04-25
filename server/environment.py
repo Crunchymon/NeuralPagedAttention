@@ -214,6 +214,7 @@ class KVCacheEnvironment:
         penalty, terminate = check_terminators(
             crashed=self.crashed,
             gpu_used=self.ledger.gpu_used,
+            gpu_total=constants.GPU_TOTAL_BLOCKS,
             free_queue_len=len(self.free_queue),
             vip_queue_len=len(self.vip_queue),
         )

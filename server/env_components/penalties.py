@@ -49,17 +49,24 @@ def check_sla_violations(
 def check_terminators(
     crashed: bool,
     gpu_used: int,
+    gpu_total: int,
     free_queue_len: int,
     vip_queue_len: int,
 ) -> tuple[float, bool]:
     """Check for episode-ending conditions."""
+    # Already flagged as crashed in a prior tick
     if crashed:
         return CRASH_PENALTY, True
 
-    if free_queue_len >= FREE_QUEUE_MAX and vip_queue_len >= VIP_QUEUE_MAX:
-        return DEADLOCK_PENALTY, True
-
-    if gpu_used > constants.GPU_TOTAL_BLOCKS:
+    # GPU overflow — hard crash
+    if gpu_used > gpu_total:
         return CRASH_PENALTY, True
+
+    # True deadlock: both queues are full AND GPU has no room left to admit anyone
+    # If GPU still has space the agent can still admit — not a deadlock
+    queues_full = free_queue_len >= FREE_QUEUE_MAX and vip_queue_len >= VIP_QUEUE_MAX
+    gpu_full = gpu_used >= gpu_total
+    if queues_full and gpu_full:
+        return DEADLOCK_PENALTY, True
 
     return 0.0, False
