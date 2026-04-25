@@ -18,6 +18,19 @@ paths:
             application/json:
               schema: {}
   /api/settings:
+    get:
+      tags:
+      - configuration
+      summary: Get environment constants
+      description: Returns the current dynamic environment constants and their original
+        default values.
+      operationId: get_settings_api_settings_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
     post:
       tags:
       - configuration

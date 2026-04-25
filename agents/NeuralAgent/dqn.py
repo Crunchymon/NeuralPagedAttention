@@ -70,7 +70,7 @@ class ReplayBuffer:
 
 # ---------------- AGENT ---------------- #
 class DQNAgent:
-    def __init__(self, state_dim=20, action_dim=18):
+    def __init__(self, state_dim=21, action_dim=18):
         self.state_dim = state_dim
         self.action_dim = action_dim
 
@@ -159,7 +159,7 @@ def run_sim(task=None, ticks=None):
     
     keys = [
         "gpu_utilization_pct", "cpu_utilization_pct", "memory_pressure_trend",
-        "free_queue_pressure", "vip_queue_pressure", "free_max_wait_time_pct",
+        "total_free_req", "total_vip_req", "total_req", "free_max_wait_time_pct",
         "vip_max_wait_time_pct", "yield_preempt_active", "free_size_max",
         "free_size_mean", "free_size_std_dev", "vip_size_max", "vip_size_mean",
         "vip_size_std_dev", "free_age_max", "free_age_mean", "free_age_std_dev",

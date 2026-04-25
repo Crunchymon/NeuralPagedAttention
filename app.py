@@ -65,6 +65,31 @@ def get_agents():
         }
     }
 
+@app.get(
+    "/api/settings",
+    tags=["configuration"],
+    summary="Get environment constants",
+    description="Returns the current dynamic environment constants and their original default values."
+)
+def get_settings():
+    return {
+        "status": "success",
+        "current_settings": {
+            "GPU_TOTAL_BLOCKS": constants.GPU_TOTAL_BLOCKS,
+            "CPU_TOTAL_BLOCKS": constants.CPU_TOTAL_BLOCKS,
+            "TOKENS_PER_BLOCK": constants.TOKENS_PER_BLOCK,
+            "PHASE_CONFIGS": constants.PHASE_CONFIGS
+        },
+        "default_settings": {
+            "GPU_TOTAL_BLOCKS": 1000,
+            "CPU_TOTAL_BLOCKS": 5000,
+            "TOKENS_PER_BLOCK": 16,
+            "max_ticks_easy": 2000,
+            "max_ticks_medium": 5000,
+            "max_ticks_hard": 10000
+        }
+    }
+
 @app.post(
     "/api/settings",
     tags=["configuration"],
@@ -88,11 +113,19 @@ def update_settings(req: SettingsRequest):
 
     return {
         "status": "success",
-        "settings": {
+        "current_settings": {
             "GPU_TOTAL_BLOCKS": constants.GPU_TOTAL_BLOCKS,
             "CPU_TOTAL_BLOCKS": constants.CPU_TOTAL_BLOCKS,
             "TOKENS_PER_BLOCK": constants.TOKENS_PER_BLOCK,
             "PHASE_CONFIGS": constants.PHASE_CONFIGS
+        },
+        "default_settings": {
+            "GPU_TOTAL_BLOCKS": 1000,
+            "CPU_TOTAL_BLOCKS": 5000,
+            "TOKENS_PER_BLOCK": 16,
+            "max_ticks_easy": 2000,
+            "max_ticks_medium": 5000,
+            "max_ticks_hard": 10000
         }
     }
 

@@ -9,8 +9,9 @@ class KVCacheObservation(BaseModel):
     cpu_utilization_pct: float = Field(ge=0.0, le=1.0)
     memory_pressure_trend: float = Field(ge=-1.0, le=1.0)
     # Queue Status
-    free_queue_pressure: float = Field(ge=0.0, le=1.0)
-    vip_queue_pressure: float = Field(ge=0.0, le=1.0)
+    total_free_req: float
+    total_vip_req: float
+    total_req: float
     free_max_wait_time_pct: float = Field(ge=0.0, le=1.0)
     vip_max_wait_time_pct: float = Field(ge=0.0, le=1.0)
     # Action Yields
@@ -29,11 +30,10 @@ class KVCacheObservation(BaseModel):
     vip_age_std_dev: float = Field(ge=0.0, le=1.0)
 
     def to_array(self) -> list[float]:
-        """Return observation as a flat list in index order 1-20."""
         return [
             self.gpu_utilization_pct, self.cpu_utilization_pct,
-            self.memory_pressure_trend, self.free_queue_pressure,
-            self.vip_queue_pressure, self.free_max_wait_time_pct,
+            self.memory_pressure_trend, self.total_free_req,
+            self.total_vip_req, self.total_req, self.free_max_wait_time_pct,
             self.vip_max_wait_time_pct, self.yield_preempt_active,
             self.free_size_max, self.free_size_mean, self.free_size_std_dev,
             self.vip_size_max, self.vip_size_mean, self.vip_size_std_dev,

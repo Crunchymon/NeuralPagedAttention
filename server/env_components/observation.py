@@ -23,8 +23,9 @@ def build_observation(
     else:
         trend = 0.0
 
-    free_q_pressure = len(free_queue) / free_queue_max
-    vip_q_pressure = len(vip_queue) / vip_queue_max
+    total_free_req = float(len(free_queue))
+    total_vip_req = float(len(vip_queue))
+    total_req = total_free_req + total_vip_req
 
     oldest_free_wait = max((r.wait_ticks for r in free_queue), default=0)
     oldest_vip_wait = max((r.wait_ticks for r in vip_queue), default=0)
@@ -67,8 +68,9 @@ def build_observation(
         gpu_utilization_pct=min(1.0, ledger.gpu_utilization()),
         cpu_utilization_pct=min(1.0, ledger.cpu_utilization()),
         memory_pressure_trend=trend,
-        free_queue_pressure=min(1.0, free_q_pressure),
-        vip_queue_pressure=min(1.0, vip_q_pressure),
+        total_free_req=total_free_req,
+        total_vip_req=total_vip_req,
+        total_req=total_req,
         free_max_wait_time_pct=free_wait_pct,
         vip_max_wait_time_pct=vip_wait_pct,
         yield_preempt_active=yield_preempt,
