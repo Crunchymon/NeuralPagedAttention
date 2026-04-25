@@ -217,8 +217,8 @@ class KVCacheEnvironment:
             free_queue_len=len(self.free_queue),
             vip_queue_len=len(self.vip_queue),
         )
-        if terminate and penalty == CRASH_PENALTY:
-            self.crashed = True
+        if terminate:
+            self.crashed = True  # crashed on any early termination (GPU overflow or deadlock)
         return penalty, terminate
 
     def _build_observation(self) -> "KVCacheObservation":
