@@ -14,6 +14,7 @@ from agents.LRUAgent.lru import run_sim as run_lru
 from agents.RandomAgent.run_random_agent import run_simulation as run_random
 from agents.QLearningAgent.QAgent import run_sim as run_qlearning
 from agents.NeuralAgent.dqn import run_sim as run_dqn
+from agents.LLMAgent.llm import run_sim as run_llm
 
 import server.env_components.constants as constants
 
@@ -53,7 +54,8 @@ def get_agents():
             {"id": "lru", "name": "Least Recently Used (LRU)", "description": "Heuristic agent that evicts the least recently used cache."},
             {"id": "random", "name": "Random Agent", "description": "Baseline agent that selects actions entirely at random."},
             {"id": "qlearning", "name": "Tabular Q-Learning Agent", "description": "RL agent using a discretized state-space Q-table."},
-            {"id": "neural", "name": "Deep Q-Network (DQN) Agent", "description": "RL agent using a PyTorch neural network to map continuous states to Q-values."}
+            {"id": "neural",    "name": "Deep Q-Network (DQN) Agent", "description": "RL agent using a PyTorch neural network to map continuous states to Q-values."},
+            {"id": "llm",       "name": "Qwen2.5-3B LLM Agent",       "description": "Locally-running Qwen2.5-3B-Instruct model that chooses actions from natural-language prompts. Auto-quantized (4-bit on CPU, bfloat16 on GPU)."}
         ],
         "usage": {
             "endpoint": "POST /api/simulate",
@@ -155,8 +157,10 @@ def run_simulation_endpoint(req: SimulationRequest):
             tick_logs, session_logs = run_qlearning(task=req.task, ticks=req.ticks)
         elif agent_type == "neural":
             tick_logs, session_logs = run_dqn(task=req.task, ticks=req.ticks)
+        elif agent_type == "llm":
+            tick_logs, session_logs = run_llm(task=req.task, ticks=req.ticks)
         else:
-            raise HTTPException(status_code=400, detail=f"Unknown agent type: {req.agent}. Supported: 'lru', 'random', 'qlearning', 'neural'.")
+            raise HTTPException(status_code=400, detail=f"Unknown agent type: {req.agent}. Supported: 'lru', 'random', 'qlearning', 'neural', 'llm'.")
             
         return {
             "status": "success",

@@ -159,8 +159,8 @@ class KVCacheEnvironment:
         return _admit_batch_fn(self, tier, pct)
 
     def _spawn_traffic(self):
-        if self.tick % 5 != 0:
-            return
+        # if self.tick % 5 != 0:
+        #     return
 
         # Reset per-tick token counters for this batch
         self.tick_prompt_tokens = 0
