@@ -1,18 +1,17 @@
 import random
 import uuid
 
+import server.env_components.constants as constants
 from server.env_components.constants import (
     CHATTER_GEN_MU,
     CHATTER_GEN_SIGMA,
     CHATTER_PROMPT_MU,
     CHATTER_PROMPT_SIGMA,
-    GPU_TOTAL_BLOCKS,
     POWER_GEN_MU,
     POWER_GEN_SIGMA,
     POWER_PROMPT_MU,
     POWER_PROMPT_SIGMA,
     RETURNING_RATIO,
-    TOKENS_PER_BLOCK,
 )
 from server.env_components.state import Request
 
@@ -38,7 +37,7 @@ def generate_request(
         prompt = max(16, int(rng.gauss(POWER_PROMPT_MU, POWER_PROMPT_SIGMA)))
         gen = max(16, int(rng.gauss(POWER_GEN_MU, POWER_GEN_SIGMA)))
 
-    max_tokens = int(GPU_TOTAL_BLOCKS * 0.8 * TOKENS_PER_BLOCK)
+    max_tokens = int(constants.GPU_TOTAL_BLOCKS * 0.8 * constants.TOKENS_PER_BLOCK)
     if prompt + gen > max_tokens:
         gen = max(16, max_tokens - prompt)
 

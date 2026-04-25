@@ -2,7 +2,7 @@ import math
 from dataclasses import dataclass
 from typing import Optional
 
-from server.env_components.constants import CPU_TOTAL_BLOCKS, GPU_TOTAL_BLOCKS, TOKENS_PER_BLOCK
+import server.env_components.constants as constants
 
 
 @dataclass
@@ -23,12 +23,12 @@ class Request:
     @property
     def total_blocks_needed(self) -> int:
         total_tokens = self.prompt_tokens + self.target_gen_tokens
-        return math.ceil(total_tokens / TOKENS_PER_BLOCK)
+        return math.ceil(total_tokens / constants.TOKENS_PER_BLOCK)
 
     @property
     def current_blocks(self) -> int:
         used_tokens = self.prompt_tokens + self.generated_tokens
-        return math.ceil(used_tokens / TOKENS_PER_BLOCK)
+        return math.ceil(used_tokens / constants.TOKENS_PER_BLOCK)
 
     @property
     def is_complete(self) -> bool:
@@ -55,16 +55,16 @@ class MemoryLedger:
         self.cpu_requests: dict[str, Request] = {}
 
     def gpu_free(self) -> int:
-        return GPU_TOTAL_BLOCKS - self.gpu_used
+        return constants.GPU_TOTAL_BLOCKS - self.gpu_used
 
     def cpu_free(self) -> int:
-        return CPU_TOTAL_BLOCKS - self.cpu_used
+        return constants.CPU_TOTAL_BLOCKS - self.cpu_used
 
     def gpu_utilization(self) -> float:
-        return self.gpu_used / GPU_TOTAL_BLOCKS
+        return self.gpu_used / constants.GPU_TOTAL_BLOCKS
 
     def cpu_utilization(self) -> float:
-        return self.cpu_used / CPU_TOTAL_BLOCKS
+        return self.cpu_used / constants.CPU_TOTAL_BLOCKS
 
     def place_on_gpu(self, req: Request, location: str = "gpu_active") -> bool:
         blocks = req.current_blocks

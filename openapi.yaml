@@ -3,6 +3,46 @@ info:
   title: Neural PagedAttention Backend API
   version: 0.1.0
 paths:
+  /api/agents:
+    get:
+      tags:
+      - simulation
+      summary: List available agents
+      description: Returns a list of all supported reinforcement learning and heuristic
+        agents, along with instructions on how to use them.
+      operationId: get_agents_api_agents_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+  /api/settings:
+    post:
+      tags:
+      - configuration
+      summary: Update environment constants
+      description: Update GPU_TOTAL_BLOCKS, CPU_TOTAL_BLOCKS, TOKENS_PER_BLOCK, and
+        max_ticks for tasks.
+      operationId: update_settings_api_settings_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SettingsRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /api/simulate:
     post:
       tags:
@@ -112,12 +152,47 @@ components:
           title: Detail
       type: object
       title: HTTPValidationError
+    SettingsRequest:
+      properties:
+        gpu_total_blocks:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Gpu Total Blocks
+        cpu_total_blocks:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Cpu Total Blocks
+        tokens_per_block:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Tokens Per Block
+        max_ticks_easy:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Max Ticks Easy
+        max_ticks_medium:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Max Ticks Medium
+        max_ticks_hard:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Max Ticks Hard
+      type: object
+      title: SettingsRequest
     SimulationRequest:
       properties:
         agent:
           type: string
           title: Agent
-          description: The name of the agent to run. Must be either 'lru' or 'random'.
+          description: The name of the agent to run. Must be either 'lru', 'random',
+            'qlearning', or 'neural'.
         task:
           anyOf:
           - type: string
@@ -125,6 +200,13 @@ components:
           title: Task
           description: 'The task difficulty to simulate. Options: ''easy'', ''medium'',
             ''hard''. If omitted, all tasks will be run sequentially.'
+        ticks:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Ticks
+          description: Optional override for the maximum number of ticks to run for
+            the simulation. If omitted, default task duration is used.
       type: object
       required:
       - agent
@@ -179,3 +261,4 @@ components:
           title: Action Id
       type: object
       title: _LegacyStepRequest
+

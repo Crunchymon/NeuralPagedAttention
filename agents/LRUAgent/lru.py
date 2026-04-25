@@ -79,7 +79,7 @@ class LRUAgent:
 
 # ---------------- RUN ---------------- #
 
-def run_sim(task=None):
+def run_sim(task=None, ticks=None):
     env = LocalEnv()
     agent = LRUAgent()
     
@@ -116,12 +116,14 @@ def run_sim(task=None):
     for ep, current_task in enumerate(tasks_to_run, start=1):
         sessionID = str(uuid.uuid4())
         obs = env.reset(current_task)
+        if ticks is not None:
+            env.env.config["max_ticks"] = ticks
         
         if obs is None:
             break
 
         total_reward = 0
-        ticks = 0
+        ticks_run = 0
         done = False
         logs = []
         while not done:
@@ -133,13 +135,13 @@ def run_sim(task=None):
                 break
 
             total_reward += reward
-            ticks += 1
+            ticks_run += 1
             
             
             obs_dict = dict(zip(keys, obs))
             log_entry = {
                 "task": current_task,
-                "tick": ticks,
+                "tick": ticks_run,
                 "session_id": sessionID,
                 "action": action_name,
                 "reward": round(reward, 2),
@@ -167,7 +169,7 @@ def run_sim(task=None):
             "task": current_task,
             "total_reward": total_reward,
             "final_score": final_score,
-            "ticks_run": ticks,
+            "ticks_run": ticks_run,
             "total_arrived": env.env.total_arrived,
             "total_completed": env.env.total_completed,
             "crashed": getattr(env.env, 'crashed', False)

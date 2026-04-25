@@ -6,10 +6,10 @@ from server.env_components.action_executor import execute_action
 from server.env_components.constants import (
     CRASH_PENALTY,
     FREE_QUEUE_MAX,
-    GPU_TOTAL_BLOCKS,
     PHASE_CONFIGS,
     VIP_QUEUE_MAX,
 )
+import server.env_components.constants as constants
 from server.env_components.observation import build_observation
 from server.env_components.penalties import (
     apply_pressure_penalty,
@@ -200,7 +200,7 @@ class KVCacheEnvironment:
             vip_queue=self.vip_queue,
             ledger=self.ledger,
             gpu_history=self._gpu_history,
-            gpu_total_blocks=GPU_TOTAL_BLOCKS,
+            gpu_total_blocks=constants.GPU_TOTAL_BLOCKS,
             free_queue_max=FREE_QUEUE_MAX,
             vip_queue_max=VIP_QUEUE_MAX,
             sla_free=self.config.get("sla_free") or 200,

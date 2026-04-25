@@ -15,6 +15,8 @@ from agents.RandomAgent.run_random_agent import run_simulation as run_random
 from agents.QLearningAgent.QAgent import run_sim as run_qlearning
 from agents.NeuralAgent.dqn import run_sim as run_dqn
 
+import server.env_components.constants as constants
+
 app = FastAPI(title="Neural PagedAttention Backend API")
 
 app.add_middleware(
@@ -28,6 +30,15 @@ app.add_middleware(
 class SimulationRequest(BaseModel):
     agent: str = Field(..., description="The name of the agent to run. Must be either 'lru', 'random', 'qlearning', or 'neural'.")
     task: Optional[str] = Field(None, description="The task difficulty to simulate. Options: 'easy', 'medium', 'hard'. If omitted, all tasks will be run sequentially.")
+    ticks: Optional[int] = Field(None, description="Optional override for the maximum number of ticks to run for the simulation. If omitted, default task duration is used.")
+
+class SettingsRequest(BaseModel):
+    gpu_total_blocks: Optional[int] = None
+    cpu_total_blocks: Optional[int] = None
+    tokens_per_block: Optional[int] = None
+    max_ticks_easy: Optional[int] = None
+    max_ticks_medium: Optional[int] = None
+    max_ticks_hard: Optional[int] = None
 
 @app.get(
     "/api/agents",
@@ -55,6 +66,37 @@ def get_agents():
     }
 
 @app.post(
+    "/api/settings",
+    tags=["configuration"],
+    summary="Update environment constants",
+    description="Update GPU_TOTAL_BLOCKS, CPU_TOTAL_BLOCKS, TOKENS_PER_BLOCK, and max_ticks for tasks."
+)
+def update_settings(req: SettingsRequest):
+    if req.gpu_total_blocks is not None:
+        constants.GPU_TOTAL_BLOCKS = req.gpu_total_blocks
+    if req.cpu_total_blocks is not None:
+        constants.CPU_TOTAL_BLOCKS = req.cpu_total_blocks
+    if req.tokens_per_block is not None:
+        constants.TOKENS_PER_BLOCK = req.tokens_per_block
+    
+    if req.max_ticks_easy is not None:
+        constants.PHASE_CONFIGS["easy"]["max_ticks"] = req.max_ticks_easy
+    if req.max_ticks_medium is not None:
+        constants.PHASE_CONFIGS["medium"]["max_ticks"] = req.max_ticks_medium
+    if req.max_ticks_hard is not None:
+        constants.PHASE_CONFIGS["hard"]["max_ticks"] = req.max_ticks_hard
+
+    return {
+        "status": "success",
+        "settings": {
+            "GPU_TOTAL_BLOCKS": constants.GPU_TOTAL_BLOCKS,
+            "CPU_TOTAL_BLOCKS": constants.CPU_TOTAL_BLOCKS,
+            "TOKENS_PER_BLOCK": constants.TOKENS_PER_BLOCK,
+            "PHASE_CONFIGS": constants.PHASE_CONFIGS
+        }
+    }
+
+@app.post(
     "/api/simulate",
     tags=["simulation"],
     summary="Run a full batch simulation",
@@ -73,13 +115,13 @@ def run_simulation_endpoint(req: SimulationRequest):
     
     try:
         if agent_type == "lru":
-            tick_logs, session_logs = run_lru(task=req.task)
+            tick_logs, session_logs = run_lru(task=req.task, ticks=req.ticks)
         elif agent_type == "random":
-            tick_logs, session_logs = run_random(task=req.task)
+            tick_logs, session_logs = run_random(task=req.task, ticks=req.ticks)
         elif agent_type == "qlearning":
-            tick_logs, session_logs = run_qlearning(task=req.task, episodes=30)
+            tick_logs, session_logs = run_qlearning(task=req.task, ticks=req.ticks)
         elif agent_type == "neural":
-            tick_logs, session_logs = run_dqn(task=req.task, episodes=30)
+            tick_logs, session_logs = run_dqn(task=req.task, ticks=req.ticks)
         else:
             raise HTTPException(status_code=400, detail=f"Unknown agent type: {req.agent}. Supported: 'lru', 'random', 'qlearning', 'neural'.")
             

@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+import server.env_components.constants as constants
 from server.env_components.constants import (
     CRASH_PENALTY,
     DEADLOCK_PENALTY,
     FREE_QUEUE_MAX,
-    GPU_TOTAL_BLOCKS,
     PAIN_95_PENALTY,
     PAIN_98_PENALTY,
     SLA_MISS_FREE,
@@ -59,7 +59,7 @@ def check_terminators(
     if free_queue_len >= FREE_QUEUE_MAX and vip_queue_len >= VIP_QUEUE_MAX:
         return DEADLOCK_PENALTY, True
 
-    if gpu_used > GPU_TOTAL_BLOCKS:
+    if gpu_used > constants.GPU_TOTAL_BLOCKS:
         return CRASH_PENALTY, True
 
     return 0.0, False

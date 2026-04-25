@@ -62,7 +62,7 @@ class RandomAgent:
 
 # ---------------- RUN ---------------- #
 
-def run_simulation(task=None):
+def run_simulation(task=None, ticks=None):
     env = RemoteEnv()
     agent = RandomAgent()
 
@@ -96,12 +96,14 @@ def run_simulation(task=None):
         print(f"[@] Starting Episode {ep} ({current_task.upper()})...")
 
         obs = env.reset(task=current_task)
+        if ticks is not None:
+            env.env.config["max_ticks"] = ticks
         if obs is None:
             print("[!] Environment error. Aborting.")
             return
 
         total_reward = 0
-        ticks = 0
+        ticks_run = 0
         done = False
         logs = []
 
@@ -116,11 +118,11 @@ def run_simulation(task=None):
                 break
 
             total_reward += reward
-            ticks += 1
+            ticks_run += 1
             
             log_entry = {
                 "task": current_task,
-                "tick": ticks,
+                "tick": ticks_run,
                 "session_id": sessionID,
                 "action": action_name,
                 "reward": round(reward, 2),
@@ -151,7 +153,7 @@ def run_simulation(task=None):
             "task": current_task,
             "total_reward": total_reward,
             "final_score": final_score,
-            "ticks_run": ticks,
+            "ticks_run": ticks_run,
             "total_arrived": env.env.total_arrived,
             "total_completed": env.env.total_completed,
             "crashed": getattr(env.env, 'crashed', False)

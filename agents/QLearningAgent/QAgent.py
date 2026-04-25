@@ -128,7 +128,7 @@ import uuid
 
 # ---------------- RUN ---------------- #
 
-def run_sim(task=None, episodes=30):
+def run_sim(task=None, ticks=None):
     env = LocalEnv()
     agent = OptimizedQLearningAgent()
 
@@ -167,82 +167,82 @@ def run_sim(task=None, episodes=30):
         tasks_to_run = [task]
 
     for current_task in tasks_to_run:
-        # Train and run episodes for this task
-        for ep in range(1, episodes + 1):
-            sessionID = str(uuid.uuid4())
-            obs = env.reset(current_task)
+        sessionID = str(uuid.uuid4())
+        obs = env.reset(current_task)
+        if ticks is not None:
+            env.env.config["max_ticks"] = ticks
             
-            if obs is None:
-                break
+        if obs is None:
+            break
 
-            total_reward = 0
-            done = False
-            ticks = 0
-            logs = []
+        total_reward = 0
+        done = False
+        ticks_run = 0
+        logs = []
 
-            while not done:
-                action = agent.select_action(obs)
-                action_name = ACTION_MAP.get(action, "Unknown")
+        while not done:
+            action = agent.select_action(obs)
+            action_name = ACTION_MAP.get(action, "Unknown")
 
-                next_obs, reward, done, _ = env.step(action)
+            next_obs, reward, done, _ = env.step(action)
 
-                agent.store((obs, action, reward, next_obs, done))
-                agent.train()
+            agent.store((obs, action, reward, next_obs, done))
+            agent.train()
 
-                obs_dict = dict(zip(keys, obs))
-                log_entry = {
-                    "task": current_task,
-                    "tick": ticks,
-                    "session_id": sessionID,
-                    "action": action_name,
-                    "reward": round(reward, 2),
-                    "score": round(total_reward + reward, 2),
-                    "episode": ep,
-                    **obs_dict
-                }
-                logs.append(log_entry)
-
-                obs = next_obs
-                total_reward += reward
-                ticks += 1
-
-                if ticks % 20 == 0 or done:
-                    print(
-                        f"[{current_task.upper()} EP {ep}] Tick {ticks:3} | "
-                        f"{action_name:25} | "
-                        f"Reward {reward:+.2f} | "
-                        f"Total {total_reward:.2f} | "
-                        f"Eps {agent.epsilon:.3f}"
-                    )
-
-            final_score = compute_final_score(
-                task=current_task,
-                total_completed=env.env.total_completed,
-                total_arrived=env.env.total_arrived,
-                per_request_fluency=env.env._per_request_fluency,
-                total_cache_hits=env.env.total_cache_hits,
-                total_returning_arrived=env.env.total_returning_arrived,
-                total_swaps=env.env.total_swaps,
-                total_actions=env.env.total_actions,
-            )
-
-            session_log = {
-                "session_id": sessionID,
+            obs_dict = dict(zip(keys, obs))
+            log_entry = {
                 "task": current_task,
-                "episode": ep,
-                "total_reward": total_reward,
-                "final_score": final_score,
-                "ticks_run": ticks,
-                "total_arrived": env.env.total_arrived,
-                "total_completed": env.env.total_completed,
-                "crashed": getattr(env.env, 'crashed', False)
+                "tick": ticks_run,
+                "session_id": sessionID,
+                "action": action_name,
+                "reward": round(reward, 2),
+                "score": round(total_reward + reward, 2),
+                "episode": 1,
+                **obs_dict
             }
-            
-            all_session_logs.append(session_log)
-            all_tick_logs.extend(logs)
+            logs.append(log_entry)
 
-            print(f"\n[✓] {current_task.upper()} Episode {ep} Score: {total_reward:.2f} | Final Env Score: {final_score:.3f}")
-            print("-"*50)
+            obs = next_obs
+            total_reward += reward
+            ticks_run += 1
+
+            if ticks_run % 20 == 0 or done:
+                print(
+                    f"[{current_task.upper()} EP 1] Tick {ticks_run:3} | "
+                    f"{action_name:25} | "
+                    f"Reward {reward:+.2f} | "
+                    f"Total {total_reward:.2f} | "
+                    f"Eps {agent.epsilon:.3f}"
+                )
+
+        final_score = compute_final_score(
+            task=current_task,
+            total_completed=env.env.total_completed,
+            total_arrived=env.env.total_arrived,
+            per_request_fluency=env.env._per_request_fluency,
+            total_cache_hits=env.env.total_cache_hits,
+            total_returning_arrived=env.env.total_returning_arrived,
+            total_swaps=env.env.total_swaps,
+            total_actions=env.env.total_actions,
+        )
+
+        session_log = {
+            "session_id": sessionID,
+            "task": current_task,
+            "episode": 1,
+            "total_reward": total_reward,
+            "final_score": final_score,
+            "ticks_run": ticks_run,
+            "total_arrived": env.env.total_arrived,
+            "total_completed": env.env.total_completed,
+            "crashed": getattr(env.env, 'crashed', False)
+        }
+        
+        all_session_logs.append(session_log)
+        all_tick_logs.extend(logs)
+
+        print(f"\n[✓] {current_task.upper()} Episode 1 Score: {total_reward:.2f} | Final Env Score: {final_score:.3f}")
+        print("-"*50)
 
     return all_tick_logs, all_session_logs
 
