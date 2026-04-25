@@ -5,7 +5,7 @@ colorFrom: blue
 colorTo: purple
 sdk: gradio
 sdk_version: "4.36.1"
-app_file: server/app.py
+app_file: app.py
 pinned: false
 ---
 # Neural PagedAttention
