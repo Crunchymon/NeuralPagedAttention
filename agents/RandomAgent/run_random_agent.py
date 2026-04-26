@@ -19,9 +19,9 @@ class RemoteEnv:
         self.env = KVCacheEnvironment()
         print(f"[*] Initialized Local Environment")
 
-    def reset(self, task="easy"):
+    def reset(self, task="easy", seed=None, traffic_trace=None):
         try:
-            obs_obj = self.env.reset(task)
+            obs_obj = self.env.reset(task, seed=seed, traffic_trace=traffic_trace)
 
             # Convert observation object → list
             obs = obs_obj.to_array() if hasattr(obs_obj, "to_array") else obs_obj
@@ -75,7 +75,7 @@ class RandomAgent:
 
 # ---------------- RUN ---------------- #
 
-def run_simulation(task=None, ticks=None):
+def run_simulation(task=None, ticks=None, seed=None, traffic_trace=None):
     env = RemoteEnv()
     agent = RandomAgent()
 
@@ -108,7 +108,7 @@ def run_simulation(task=None, ticks=None):
         sessionID = str(uuid.uuid4())
         print(f"[@] Starting Episode {ep} ({current_task.upper()})...")
 
-        obs = env.reset(task=current_task)
+        obs = env.reset(task=current_task, seed=seed, traffic_trace=traffic_trace)
         if ticks is not None:
             env.env.config["max_ticks"] = ticks
         if obs is None:

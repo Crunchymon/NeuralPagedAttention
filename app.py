@@ -17,6 +17,7 @@ from agents.NeuralAgent.dqn import run_sim as run_dqn
 from agents.LLMAgent.llm import run_sim as run_llm
 
 import server.env_components.constants as constants
+from server.env_components.traffic import build_traffic_trace
 
 app = FastAPI(title="Neural PagedAttention Backend API")
 
@@ -37,9 +38,78 @@ class SettingsRequest(BaseModel):
     gpu_total_blocks: Optional[int] = None
     cpu_total_blocks: Optional[int] = None
     tokens_per_block: Optional[int] = None
+    max_queue_size: Optional[int] = None
     max_ticks_easy: Optional[int] = None
     max_ticks_medium: Optional[int] = None
     max_ticks_hard: Optional[int] = None
+
+
+class BatchSimulationRequest(BaseModel):
+    gpu_total_blocks: Optional[int] = None
+    cpu_total_blocks: Optional[int] = None
+    tokens_per_block: Optional[int] = None
+    max_queue_size: Optional[int] = None
+    max_ticks_easy: Optional[int] = None
+    max_ticks_medium: Optional[int] = None
+    max_ticks_hard: Optional[int] = None
+    seed: int = Field(..., ge=0)
+    agents: Optional[list[str]] = None
+    tasks: Optional[list[str]] = None
+    include_tick_logs: bool = True
+
+
+AGENT_RUNNERS = {
+    "lru": run_lru,
+    "random": run_random,
+    "qlearning": run_qlearning,
+    "neural": run_dqn,
+    "llm": run_llm,
+}
+
+
+def _apply_runtime_settings(
+    gpu_total_blocks: Optional[int] = None,
+    cpu_total_blocks: Optional[int] = None,
+    tokens_per_block: Optional[int] = None,
+    max_queue_size: Optional[int] = None,
+    max_ticks_easy: Optional[int] = None,
+    max_ticks_medium: Optional[int] = None,
+    max_ticks_hard: Optional[int] = None,
+):
+    if gpu_total_blocks is not None:
+        constants.GPU_TOTAL_BLOCKS = gpu_total_blocks
+    if cpu_total_blocks is not None:
+        constants.CPU_TOTAL_BLOCKS = cpu_total_blocks
+    if tokens_per_block is not None:
+        constants.TOKENS_PER_BLOCK = tokens_per_block
+    if max_queue_size is not None:
+        constants.FREE_QUEUE_MAX = max_queue_size
+        constants.VIP_QUEUE_MAX = max_queue_size
+
+    if max_ticks_easy is not None:
+        constants.PHASE_CONFIGS["easy"]["max_ticks"] = max_ticks_easy
+    if max_ticks_medium is not None:
+        constants.PHASE_CONFIGS["medium"]["max_ticks"] = max_ticks_medium
+    if max_ticks_hard is not None:
+        constants.PHASE_CONFIGS["hard"]["max_ticks"] = max_ticks_hard
+
+
+def _runtime_settings_snapshot() -> dict:
+    return {
+        "GPU_TOTAL_BLOCKS": constants.GPU_TOTAL_BLOCKS,
+        "CPU_TOTAL_BLOCKS": constants.CPU_TOTAL_BLOCKS,
+        "TOKENS_PER_BLOCK": constants.TOKENS_PER_BLOCK,
+        "FREE_QUEUE_MAX": constants.FREE_QUEUE_MAX,
+        "VIP_QUEUE_MAX": constants.VIP_QUEUE_MAX,
+        "PHASE_CONFIGS": constants.PHASE_CONFIGS,
+    }
+
+
+def _run_agent(agent_type: str, task: str, ticks: Optional[int], seed: int, traffic_trace):
+    runner = AGENT_RUNNERS.get(agent_type)
+    if runner is None:
+        raise HTTPException(status_code=400, detail=f"Unknown agent type: {agent_type}. Supported: {sorted(AGENT_RUNNERS)}")
+    return runner(task=task, ticks=ticks, seed=seed, traffic_trace=traffic_trace)
 
 @app.get(
     "/api/agents",
@@ -76,16 +146,12 @@ def get_agents():
 def get_settings():
     return {
         "status": "success",
-        "current_settings": {
-            "GPU_TOTAL_BLOCKS": constants.GPU_TOTAL_BLOCKS,
-            "CPU_TOTAL_BLOCKS": constants.CPU_TOTAL_BLOCKS,
-            "TOKENS_PER_BLOCK": constants.TOKENS_PER_BLOCK,
-            "PHASE_CONFIGS": constants.PHASE_CONFIGS
-        },
+        "current_settings": _runtime_settings_snapshot(),
         "default_settings": {
             "GPU_TOTAL_BLOCKS": 1000,
             "CPU_TOTAL_BLOCKS": 5000,
             "TOKENS_PER_BLOCK": 16,
+            "max_queue_size": 100,
             "max_ticks_easy": 2000,
             "max_ticks_medium": 5000,
             "max_ticks_hard": 10000
@@ -99,37 +165,114 @@ def get_settings():
     description="Update GPU_TOTAL_BLOCKS, CPU_TOTAL_BLOCKS, TOKENS_PER_BLOCK, and max_ticks for tasks."
 )
 def update_settings(req: SettingsRequest):
-    if req.gpu_total_blocks is not None:
-        constants.GPU_TOTAL_BLOCKS = req.gpu_total_blocks
-    if req.cpu_total_blocks is not None:
-        constants.CPU_TOTAL_BLOCKS = req.cpu_total_blocks
-    if req.tokens_per_block is not None:
-        constants.TOKENS_PER_BLOCK = req.tokens_per_block
-    
-    if req.max_ticks_easy is not None:
-        constants.PHASE_CONFIGS["easy"]["max_ticks"] = req.max_ticks_easy
-    if req.max_ticks_medium is not None:
-        constants.PHASE_CONFIGS["medium"]["max_ticks"] = req.max_ticks_medium
-    if req.max_ticks_hard is not None:
-        constants.PHASE_CONFIGS["hard"]["max_ticks"] = req.max_ticks_hard
+    _apply_runtime_settings(
+        gpu_total_blocks=req.gpu_total_blocks,
+        cpu_total_blocks=req.cpu_total_blocks,
+        tokens_per_block=req.tokens_per_block,
+        max_queue_size=req.max_queue_size,
+        max_ticks_easy=req.max_ticks_easy,
+        max_ticks_medium=req.max_ticks_medium,
+        max_ticks_hard=req.max_ticks_hard,
+    )
 
     return {
         "status": "success",
-        "current_settings": {
-            "GPU_TOTAL_BLOCKS": constants.GPU_TOTAL_BLOCKS,
-            "CPU_TOTAL_BLOCKS": constants.CPU_TOTAL_BLOCKS,
-            "TOKENS_PER_BLOCK": constants.TOKENS_PER_BLOCK,
-            "PHASE_CONFIGS": constants.PHASE_CONFIGS
-        },
+        "current_settings": _runtime_settings_snapshot(),
         "default_settings": {
             "GPU_TOTAL_BLOCKS": 1000,
             "CPU_TOTAL_BLOCKS": 5000,
             "TOKENS_PER_BLOCK": 16,
+            "max_queue_size": 100,
             "max_ticks_easy": 2000,
             "max_ticks_medium": 3000,
             "max_ticks_hard": 5000
         }
     }   
+
+
+@app.post(
+    "/api/simulate-all",
+    tags=["simulation"],
+    summary="Run all agents and tasks with shared seeded traffic",
+    description="Applies runtime configuration, generates one deterministic traffic trace per task from the provided seed, runs every selected agent, and returns combined tick and session telemetry.",
+)
+def run_all_simulations(req: BatchSimulationRequest):
+    _apply_runtime_settings(
+        gpu_total_blocks=req.gpu_total_blocks,
+        cpu_total_blocks=req.cpu_total_blocks,
+        tokens_per_block=req.tokens_per_block,
+        max_queue_size=req.max_queue_size,
+        max_ticks_easy=req.max_ticks_easy,
+        max_ticks_medium=req.max_ticks_medium,
+        max_ticks_hard=req.max_ticks_hard,
+    )
+
+    selected_agents = [agent.lower() for agent in (req.agents or list(AGENT_RUNNERS.keys()))]
+    selected_tasks = [task.lower() for task in (req.tasks or ["easy", "medium", "hard"])]
+
+    for agent in selected_agents:
+        if agent not in AGENT_RUNNERS:
+            raise HTTPException(status_code=400, detail=f"Unknown agent type: {agent}. Supported: {sorted(AGENT_RUNNERS)}")
+    for task in selected_tasks:
+        if task not in constants.PHASE_CONFIGS:
+            raise HTTPException(status_code=400, detail=f"Unknown task: {task}. Supported: {sorted(constants.PHASE_CONFIGS)}")
+
+    results_by_task: dict[str, dict[str, dict]] = {}
+    all_session_logs: list[dict] = []
+    all_tick_logs: list[dict] = []
+
+    for task in selected_tasks:
+        task_config = constants.PHASE_CONFIGS[task]
+        traffic_trace = build_traffic_trace(
+            task=task_config["traffic_fn"],
+            max_ticks=task_config["max_ticks"],
+            seed=req.seed,
+            vip_ratio=task_config["vip_ratio"],
+            power_user_pct=task_config["power_user_pct"],
+        )
+        results_by_task[task] = {}
+
+        for agent in selected_agents:
+            tick_logs, session_logs = _run_agent(
+                agent_type=agent,
+                task=task,
+                ticks=task_config["max_ticks"],
+                seed=req.seed,
+                traffic_trace=traffic_trace,
+            )
+
+            enriched_session_logs = []
+            for session_log in session_logs:
+                session_copy = dict(session_log)
+                session_copy["agent"] = agent
+                session_copy["task"] = task
+                enriched_session_logs.append(session_copy)
+                all_session_logs.append(session_copy)
+
+            enriched_tick_logs = []
+            if req.include_tick_logs:
+                for tick_log in tick_logs:
+                    tick_copy = dict(tick_log)
+                    tick_copy["agent"] = agent
+                    tick_copy["task"] = task
+                    enriched_tick_logs.append(tick_copy)
+                    all_tick_logs.append(tick_copy)
+
+            results_by_task[task][agent] = {
+                "session_logs": enriched_session_logs,
+                "tick_logs": enriched_tick_logs if req.include_tick_logs else [],
+            }
+
+    return {
+        "status": "success",
+        "seed": req.seed,
+        "applied_config": _runtime_settings_snapshot(),
+        "tasks": selected_tasks,
+        "agents": selected_agents,
+        "results_by_task": results_by_task,
+        "all_session_logs": all_session_logs,
+        "all_tick_logs": all_tick_logs if req.include_tick_logs else [],
+    }
 
 @app.post(
     "/api/simulate",
@@ -149,18 +292,14 @@ def run_simulation_endpoint(req: SimulationRequest):
     agent_type = req.agent.lower()
     
     try:
-        if agent_type == "lru":
-            tick_logs, session_logs = run_lru(task=req.task, ticks=req.ticks)
-        elif agent_type == "random":
-            tick_logs, session_logs = run_random(task=req.task, ticks=req.ticks)
-        elif agent_type == "qlearning":
-            tick_logs, session_logs = run_qlearning(task=req.task, ticks=req.ticks)
-        elif agent_type == "neural":
-            tick_logs, session_logs = run_dqn(task=req.task, ticks=req.ticks)
-        elif agent_type == "llm":
-            tick_logs, session_logs = run_llm(task=req.task, ticks=req.ticks)
-        else:
-            raise HTTPException(status_code=400, detail=f"Unknown agent type: {req.agent}. Supported: 'lru', 'random', 'qlearning', 'neural', 'llm'.")
+        tasks_to_run = [req.task] if req.task else ["easy", "medium", "hard"]
+        tick_logs = []
+        session_logs = []
+
+        for task in tasks_to_run:
+            task_tick_logs, task_session_logs = _run_agent(agent_type, task, req.ticks, seed=42, traffic_trace=None)
+            tick_logs.extend(task_tick_logs)
+            session_logs.extend(task_session_logs)
             
         return {
             "status": "success",

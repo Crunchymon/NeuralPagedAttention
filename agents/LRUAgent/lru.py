@@ -21,9 +21,9 @@ class LocalEnv:
         self.env = KVCacheEnvironment()
         print("[*] LRUAgent: Using Local Environment")
 
-    def reset(self, task="easy"):
+    def reset(self, task="easy", seed=None, traffic_trace=None):
         try:
-            obs_obj = self.env.reset(task)
+            obs_obj = self.env.reset(task, seed=seed, traffic_trace=traffic_trace)
             return obs_obj.to_array()
         except Exception as e:
             print(f"[!] Reset Error: {e}")
@@ -138,7 +138,7 @@ class LRUAgent:
 
 # ---------------- RUN ---------------- #
 
-def run_sim(task=None, ticks=None):
+def run_sim(task=None, ticks=None, seed=None, traffic_trace=None):
     env = LocalEnv()
     agent = LRUAgent()
     
@@ -175,7 +175,7 @@ def run_sim(task=None, ticks=None):
         display_task = task.upper()
     for ep, current_task in enumerate(tasks_to_run, start=1):
         sessionID = str(uuid.uuid4())
-        obs = env.reset(current_task)
+        obs = env.reset(current_task, seed=seed, traffic_trace=traffic_trace)
         if ticks is not None:
             env.env.config["max_ticks"] = ticks
         

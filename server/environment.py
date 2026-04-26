@@ -5,9 +5,7 @@ from models import KVCacheObservation, KVCacheState
 from server.env_components.action_executor import execute_action, admit_batch as _admit_batch_fn
 from server.env_components.constants import (
     CRASH_PENALTY,
-    FREE_QUEUE_MAX,
     PHASE_CONFIGS,
-    VIP_QUEUE_MAX,
 )
 import server.env_components.constants as constants
 from server.env_components.observation import build_observation
@@ -52,19 +50,21 @@ class KVCacheEnvironment:
         self._gpu_history: list[float] = []
         self._returning_pool: list[str] = []
         self._last_action_result: str = "none"
+        self._traffic_trace: list[list[dict]] | None = None
 
         # Per-tick token stats (reset each _spawn_traffic call)
         self.tick_prompt_tokens: int = 0
         self.tick_gen_tokens: int = 0
         self.tick_max_tokens: int = 0
 
-    def reset(self, task: str = "easy") -> "KVCacheObservation":
+    def reset(self, task: str = "easy", seed: int | None = None, traffic_trace: list[list[dict]] | None = None) -> "KVCacheObservation":
         assert task in PHASE_CONFIGS, f"Unknown task: {task}"
         self.task = task
         self.config = PHASE_CONFIGS[task]
         self.tick = 0
         self.episode_id = str(uuid.uuid4())[:12]
-        self.rng = random.Random(42)
+        self.rng = random.Random(42 if seed is None else seed)
+        self._traffic_trace = traffic_trace
 
         self.free_queue = []
         self.vip_queue = []
@@ -159,25 +159,38 @@ class KVCacheEnvironment:
         return _admit_batch_fn(self, tier, pct)
 
     def _spawn_traffic(self):
-        # if self.tick % 5 != 0:
-        #     return
-
         # Reset per-tick token counters for this batch
         self.tick_prompt_tokens = 0
         self.tick_gen_tokens = 0
         self.tick_max_tokens = 0
 
-        traffic_fn = TRAFFIC_FNS[self.config["traffic_fn"]]
-        n_arrivals = traffic_fn(self.tick) * 5
+        if self._traffic_trace is not None and self.tick < len(self._traffic_trace):
+            planned_requests = self._traffic_trace[self.tick]
+        else:
+            traffic_fn = TRAFFIC_FNS[self.config["traffic_fn"]]
+            n_arrivals = traffic_fn(self.tick) * 5
+            planned_requests = []
 
-        for _ in range(n_arrivals):
-            req = generate_request(
-                tick=self.tick,
-                vip_ratio=self.config["vip_ratio"],
-                power_user_pct=self.config["power_user_pct"],
-                returning_pool=self._returning_pool,
-                rng=self.rng,
-            )
+            for _ in range(n_arrivals):
+                req = generate_request(
+                    tick=self.tick,
+                    vip_ratio=self.config["vip_ratio"],
+                    power_user_pct=self.config["power_user_pct"],
+                    returning_pool=self._returning_pool,
+                    rng=self.rng,
+                )
+                planned_requests.append({
+                    "request_id": req.request_id,
+                    "tier": req.tier,
+                    "user_type": req.user_type,
+                    "is_returning": req.is_returning,
+                    "prompt_tokens": req.prompt_tokens,
+                    "target_gen_tokens": req.target_gen_tokens,
+                    "arrival_tick": req.arrival_tick,
+                })
+
+        for request_data in planned_requests:
+            req = Request(**request_data)
             self.total_arrived += 1
 
             # Accumulate token stats
@@ -187,10 +200,10 @@ class KVCacheEnvironment:
             self.tick_max_tokens += max_tokens
 
             if req.tier == "vip":
-                if len(self.vip_queue) < VIP_QUEUE_MAX:
+                if len(self.vip_queue) < constants.VIP_QUEUE_MAX:
                     self.vip_queue.append(req)
             else:
-                if len(self.free_queue) < FREE_QUEUE_MAX:
+                if len(self.free_queue) < constants.FREE_QUEUE_MAX:
                     self.free_queue.append(req)
 
     def _apply_pressure_penalty(self) -> float:
@@ -229,8 +242,8 @@ class KVCacheEnvironment:
             ledger=self.ledger,
             gpu_history=self._gpu_history,
             gpu_total_blocks=constants.GPU_TOTAL_BLOCKS,
-            free_queue_max=FREE_QUEUE_MAX,
-            vip_queue_max=VIP_QUEUE_MAX,
+            free_queue_max=constants.FREE_QUEUE_MAX,
+            vip_queue_max=constants.VIP_QUEUE_MAX,
             sla_free=self.config.get("sla_free") or 200,
             sla_vip=self.config.get("sla_vip") or 100,
         )

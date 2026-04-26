@@ -4,12 +4,10 @@ import server.env_components.constants as constants
 from server.env_components.constants import (
     CRASH_PENALTY,
     DEADLOCK_PENALTY,
-    FREE_QUEUE_MAX,
     PAIN_95_PENALTY,
     PAIN_98_PENALTY,
     SLA_MISS_FREE,
     SLA_MISS_VIP,
-    VIP_QUEUE_MAX,
 )
 
 
@@ -64,7 +62,7 @@ def check_terminators(
 
     # True deadlock: both queues are full AND GPU has no room left to admit anyone
     # If GPU still has space the agent can still admit — not a deadlock
-    queues_full = free_queue_len >= FREE_QUEUE_MAX and vip_queue_len >= VIP_QUEUE_MAX
+    queues_full = free_queue_len >= constants.FREE_QUEUE_MAX and vip_queue_len >= constants.VIP_QUEUE_MAX
     gpu_full = gpu_used >= gpu_total
     if queues_full and gpu_full:
         return DEADLOCK_PENALTY, True

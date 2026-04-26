@@ -61,10 +61,10 @@ class LocalEnv:
         self.env = KVCacheEnvironment()
         print("[*] LLMAgent: Using Local Environment")
 
-    def reset(self, task: str = "easy") -> list[float] | None:
+    def reset(self, task: str = "easy", seed: int | None = None, traffic_trace: list[list[dict]] | None = None) -> list[float] | None:
         """Reset the environment and return the initial observation array."""
         try:
-            obs_obj = self.env.reset(task)
+            obs_obj = self.env.reset(task, seed=seed, traffic_trace=traffic_trace)
             return obs_obj.to_array() if obs_obj is not None else None
         except Exception as exc:
             print(f"[!] Reset error: {exc}")
@@ -347,7 +347,7 @@ class LLMAgent:
 # Run Simulation (public API — matches all other agents)
 # ---------------------------------------------------------------------------
 
-def run_sim(task: str | None = None, ticks: int | None = None) -> tuple[list, list]:
+def run_sim(task: str | None = None, ticks: int | None = None, seed: int | None = None, traffic_trace: list[list[dict]] | None = None) -> tuple[list, list]:
     """
     Run the LLM agent simulation for the given task difficulty.
 
@@ -384,7 +384,7 @@ def run_sim(task: str | None = None, ticks: int | None = None) -> tuple[list, li
 
     for current_task in tasks_to_run:
         session_id = str(uuid.uuid4())
-        obs = env.reset(current_task)
+        obs = env.reset(current_task, seed=seed, traffic_trace=traffic_trace)
         if obs is None:
             print(f"[!] Reset failed for task '{current_task}', skipping.")
             continue
