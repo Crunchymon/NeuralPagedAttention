@@ -21,10 +21,18 @@ import sys
 import random
 import torch
 
+try:
+    import transformers
+
+    transformers.logging.set_verbosity_error()
+except Exception:
+    pass
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
 import server.env_components.constants as constants
 from server.environment import KVCacheEnvironment
+from server.env_components.scoring import compute_final_score
 from agents.LLMAgent.prompts import SYSTEM_PROMPT, build_user_prompt
 
 MODEL_NAME = "Qwen/Qwen2.5-1.5B-Instruct"
@@ -33,6 +41,8 @@ PARSE_FAIL_EXTRA = -2.0
 CHUNK_SIZE = 24
 GAMMA = 0.99
 MAX_GRAD_NORM = 1.0
+# Use max_length = prompt + N (not max_new_tokens) so Unsloth/HF configs with max_length=32768 do not warn.
+GEN_EXTRA_TOKENS = 8
 
 
 def parse_action(text: str) -> int | None:
@@ -153,7 +163,11 @@ def main():
     env = KVCacheEnvironment()
     TRAINING_EPISODES = args.episodes
 
-    print(f"\n[*] Starting training: {TRAINING_EPISODES} episodes | lr={args.lr} | chunk={CHUNK_SIZE}\n")
+    print(f"\n[*] Starting training: {TRAINING_EPISODES} episodes | lr={args.lr} | chunk={CHUNK_SIZE}")
+    print(
+        "[*] Note: cumulative step reward ('total') is usually NEGATIVE (taxes/penalties every tick). "
+        "Watch final_score (0–1) at end of each episode — that is the meaningful quality metric.\n"
+    )
 
     for episode in range(TRAINING_EPISODES):
         current_task = random.choice(["easy", "medium", "hard"])
@@ -191,9 +205,10 @@ def main():
             prompt_len = inputs["input_ids"].shape[1]
 
             with torch.no_grad():
+                # Single stopping criterion avoids: "Both max_new_tokens and max_length seem set"
                 output_ids = model.generate(
                     **inputs,
-                    max_new_tokens=8,
+                    max_length=prompt_len + GEN_EXTRA_TOKENS,
                     do_sample=True,
                     top_p=0.92,
                     temperature=0.75,
@@ -239,9 +254,10 @@ def main():
                 chunk_buf = []
 
             if tick % 12 == 0:
+                mean_r = total_reward / max(1, tick)
                 print(
                     f"[EP {episode} | {current_task.upper():<6} | T{tick:4}] "
-                    f"action={action:2} | r={reward:6.2f} | total={total_reward:8.1f}"
+                    f"action={action:2} | r={reward:6.2f} | sum_r={total_reward:8.1f} | mean_r/tick={mean_r:6.3f}"
                 )
 
             tick += 1
@@ -249,7 +265,25 @@ def main():
         if chunk_buf:
             flush_chunk(chunk_buf, model, optimizer, entropy_coef)
 
-        print(f"\n[✓] Episode {episode} | {current_task} | ticks={tick} | return={total_reward:.2f}\n" + "-" * 50)
+        final_score = compute_final_score(
+            task=current_task,
+            total_completed=env.total_completed,
+            total_arrived=env.total_arrived,
+            per_request_fluency=env._per_request_fluency,
+            total_cache_hits=env.total_cache_hits,
+            total_returning_arrived=env.total_returning_arrived,
+            total_swaps=env.total_swaps,
+            total_actions=env.total_actions,
+        )
+        done_rate = env.total_completed / max(1, env.total_arrived)
+        print(
+            f"\n[✓] Episode {episode} | task={current_task} | ticks={tick}\n"
+            f"    cum_step_return={total_reward:.1f} (often negative; not a 0–1 score)\n"
+            f"    final_score={final_score:.4f} (0–1, higher is better) | "
+            f"completed {env.total_completed}/{env.total_arrived} ({done_rate:.1%}) | "
+            f"crashed={env.crashed}\n"
+            + "-" * 50
+        )
 
     output_dir = os.path.join(os.path.dirname(__file__), "ppo_lora_agent")
     print(f"[*] Saving LoRA adapter to: {output_dir}")

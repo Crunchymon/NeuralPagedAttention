@@ -1,0 +1,8 @@
+# HF Space training runtime (repo root is also copied — full env uses project code)
+gradio>=4.36.0
+huggingface_hub>=0.24.0
+numpy>=1.26.0
+pydantic>=2.7.0
+torch>=2.2.0
+torchvision
+torchaudio

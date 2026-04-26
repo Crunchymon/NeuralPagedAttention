@@ -1,0 +1,27 @@
+# Heavier image with Unsloth for PPO on HF Space. Build from repo root:
+#   docker build -f hf_train_space/Dockerfile.unsloth -t npa-train-ppo .
+#
+# Space may need a longer build timeout. Set Variable TRAIN_PPO=1.
+
+FROM pytorch/pytorch:2.4.1-cuda12.4-cudnn9-devel
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY hf_train_space/requirements.txt /tmp/space-requirements.txt
+RUN pip install --no-cache-dir -r /tmp/space-requirements.txt
+
+# Unsloth (CUDA); adjust if Space build fails — see https://github.com/unslothai/unsloth
+RUN pip install --no-cache-dir "packaging" ninja && \
+    pip install --no-cache-dir "unsloth[colab-new] @ git+https://github.com/unslothai/unsloth.git" || true
+RUN pip install --no-cache-dir xformers trl peft accelerate bitsandbytes transformers sentencepiece protobuf || true
+
+COPY . /app
+
+EXPOSE 7860
+
+CMD ["python", "hf_train_space/app.py"]
