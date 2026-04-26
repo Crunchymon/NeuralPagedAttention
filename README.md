@@ -273,6 +273,12 @@ The table below reports the **environment final score** (a composite of throughp
 | LLM (Qwen2.5-1.5B) | 0.267 | 0.309  | 0.333 | Hosted run; ~50-tick budget. Parse-failure rate **0%** |
 | PPO (Unsloth + LoRA) | 0.334 | 0.253 | **0.352** | Hosted run; survives furthest on `medium` (138 ticks) before crash |
 
+Cumulative-score traces from the live dashboard make the gap between difficulty tiers easy to read: every agent finishes `easy` in positive territory, while every agent is in free fall by the end of `hard`.
+
+![Cumulative score over time on the easy task — LRU, PPO, NEURAL and LLM all complete the run, with LRU well clear of the rest.](assets/Reward_easy.png)
+
+![Cumulative score over time on the hard task — every agent trends sharply negative as the queues overwhelm GPU capacity.](assets/Reward_hard.png)
+
 Raw per-run telemetry (reward totals, ticks run, arrival/completion counts, crash flags, LLM parse failures) is saved to [`results/benchmarks.json`](./results/benchmarks.json) and the full LLM/PPO tick-level traces are in [`results/remote_runs/`](./results/remote_runs/).
 
 A few takeaways:
@@ -318,6 +324,12 @@ It is a Vite + React + Recharts client that talks to the public Hugging Face Spa
 - **Queue panels** — separate `Free Requests` and `VIP Requests` charts surface the queue dynamics that drive the SLA-miss penalties.
 - **Live log** — per-tick action / reward / tick stream (`log-action`, `log-reward`, `log-tick`) and a `Live Score` running total.
 - **Status badges** — `COMPLETED` and `CRASHED` flags per session, matching the `crashed` field in the API's `session_logs`.
+
+A completed `easy` run vs. a fully-crashed `hard` run, side by side on the dashboard's traffic / token / macro-stats panels:
+
+![Easy run dashboard view — Free/VIP queues stay near zero, token processing tops out around 1.5k, and the per-agent macro stats panel shows COMPLETED status for LRU, NEURAL, LLM, and PPO.](assets/Session_easy.png)
+
+![Hard run dashboard view — Free queue saturated at 100 and VIP queue saturated at 50, generated-token bursts above 45k/tick, all four agents in CRASHED status.](assets/Session_Hard.png)
 
 ### Insights you can read off the dashboard
 

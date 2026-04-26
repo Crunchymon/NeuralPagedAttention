@@ -98,6 +98,12 @@ We ran every shipped agent on every task. Random, LRU, Q-Learning, and DQN were 
 | LLM (Qwen2.5-1.5B) | 0.267 | 0.309  | 0.333 |
 | PPO (Unsloth+LoRA) | 0.334 | 0.253  | **0.352** |
 
+The cumulative-score traces tell the same story visually — a comfortable run on `easy` where every agent finishes in the green, and a cliff on `hard` where every agent's score is in free fall by the time the episode ends:
+
+![Cumulative score over time on the easy task — LRU, PPO, NEURAL and LLM all complete the run, with LRU well clear of the rest.](assets/Reward_easy.png)
+
+![Cumulative score over time on the hard task — every agent's score trends sharply negative as the queues overwhelm GPU capacity. The headline numbers in the score table above are end-of-episode floors after the crash, not steady-state performance.](assets/Reward_hard.png)
+
 A few things worth pulling out of these numbers:
 
 - **Easy is mostly a sanity check.** Even a uniformly-random policy reaches `0.887` because traffic stays well under capacity. The environment doesn't really start *testing* a policy until medium.
@@ -126,7 +132,15 @@ It is a thin client over the Hugging Face Space backend (`https://suryanshchattr
 
 ### What it lets you actually see
 
-The numbers in the table above are end-of-episode summaries. The dashboard adds the dynamics that produced them:
+The numbers in the table above are end-of-episode summaries. The dashboard adds the dynamics that produced them.
+
+A completed `easy` run looks calm — request queues stay shallow, token throughput tops out around 1.5k tokens/tick, and every agent ends with a `COMPLETED` badge:
+
+![Easy run dashboard view — Free/VIP queues stay near zero, token processing tops out around 1.5k, and the per-agent macro stats panel shows COMPLETED status for LRU, NEURAL, LLM, and PPO.](assets/Session_easy.png)
+
+The same agents on `hard` look very different — the Free queue saturates at ~100, VIP at ~50, generated tokens spike past 45k/tick, GPU utilization pins at 100%, and every agent ends with a `CRASHED` badge. This is the cliff that the score table compresses into a single number:
+
+![Hard run dashboard view — Free queue saturated at 100 and VIP queue saturated at 50, generated-token bursts above 45k/tick, all four agents in CRASHED status.](assets/Session_Hard.png)
 
 1. **Crashes are sudden, not gradual.** The cumulative-score line for Random and DQN flattens within seconds of starting medium / hard. The score table shows `0.001`; the dashboard shows the cliff.
 2. **GPU utilization tends to climb in concentrated 5–10 tick bursts**, not slow drift. Policies that don't pre-empt aggressively lose the window — which is why the LRU "swap oldest at 85%" rule does so much better than its simplicity suggests.
