@@ -1,3 +1,4 @@
+import math
 import random
 import uuid
 
@@ -10,6 +11,27 @@ from server.env_components.constants import (
     VIP_QUEUE_MAX,
 )
 import server.env_components.constants as constants
+
+
+def _poisson(rng: random.Random, lam: float) -> int:
+    """Sample from Poisson(lam) using only the seeded random.Random.
+
+    Knuth's multiplication algorithm for small lam; normal approximation
+    once lam exceeds ~30 to avoid the underflow / pathological loop length.
+    Keeps determinism tied to constants.TRAFFIC_SEED.
+    """
+    if lam <= 0:
+        return 0
+    if lam < 30:
+        L = math.exp(-lam)
+        k = 0
+        p = 1.0
+        while True:
+            k += 1
+            p *= rng.random()
+            if p <= L:
+                return k - 1
+    return max(0, round(rng.gauss(lam, math.sqrt(lam))))
 from server.env_components.observation import build_observation
 from server.env_components.penalties import (
     apply_pressure_penalty,
@@ -169,11 +191,11 @@ class KVCacheEnvironment:
 
         traffic_fn = TRAFFIC_FNS[self.config["traffic_fn"]]
         expected_arrivals = traffic_fn(self.tick)
-        
-        # Add randomness: expected +/- 1.5 * expected -> expected * [-0.5, 2.5]
-        # Since negative arrivals don't make sense, we clamp to 0
-        variation = self.rng.uniform(-1.5, 1.5)
-        n_arrivals = max(0, int(expected_arrivals * (1 + variation)))
+
+        # Poisson(expected_arrivals) preserves the advertised mean from the
+        # traffic_fn and avoids the silent upward skew of the old
+        # max(0, expected*(1 + Uniform(-1.5, 1.5))) draw.
+        n_arrivals = _poisson(self.rng, float(expected_arrivals))
 
         for _ in range(n_arrivals):
             req = generate_request(
@@ -250,4 +272,5 @@ class KVCacheEnvironment:
             total_returning_arrived=self.total_returning_arrived,
             total_swaps=self.total_swaps,
             total_actions=self.total_actions,
+            crashed=self.crashed,
         )

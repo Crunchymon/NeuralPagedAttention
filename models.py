@@ -43,8 +43,8 @@ class KVCacheObservation(BaseModel):
 
 
 class KVCacheAction(BaseModel):
-    """Single discrete action, integer 0-17."""
-    action_id: int = Field(ge=0, le=17)
+    """Single discrete action, integer 0-18."""
+    action_id: int = Field(ge=0, le=18)
 
 
 class KVCacheState(BaseModel):
@@ -82,10 +82,11 @@ ACTION_MAP = {
     9:  "Admit next VIP user from queue",
     10: "Reject next Free user (penalty if GPU has space)",
     11: "Reject next VIP user (penalty if GPU has space)",
-    12: "Preempt & Shred Largest Active Free request",
-    13: "Preempt & Shred Largest Active VIP request",
+    12: "Preempt & Swap Largest Active Free -> CPU (alias of 14)",
+    13: "Preempt & Swap Largest Active VIP -> CPU (alias of 15)",
     14: "Preempt & Swap Largest Active Free -> CPU",
     15: "Preempt & Swap Largest Active VIP -> CPU",
     16: "Garbage Collect (delete idle CPU caches > 200 ticks)",
-    17: "Do Nothing"
+    17: "Do Nothing",
+    18: "Admit batch (50% VIP queue then 50% Free queue, GPU permitting)",
 }

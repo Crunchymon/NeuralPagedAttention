@@ -10,7 +10,14 @@ INACTIVITY_TTL      = int(os.getenv("NPA_INACTIVITY_TTL", "600"))   # 10 min def
 GPU_TOTAL_BLOCKS = int(os.getenv("NPA_GPU_TOTAL_BLOCKS", "1000"))
 CPU_TOTAL_BLOCKS = int(os.getenv("NPA_CPU_TOTAL_BLOCKS", "5000"))
 TOKENS_PER_BLOCK = 16
-TRAFFIC_SEED = None
+# Compute-bandwidth cap: only MAX_CONCURRENT_GENERATING GPU-resident requests
+# actually advance per tick; the rest hold their cache but accrue idle_ticks.
+# Promoting to "gpu_idle" makes them eligible eviction/swap targets.
+MAX_CONCURRENT_GENERATING = int(os.getenv("NPA_MAX_CONCURRENT_GENERATING", "12"))
+IDLE_PROMOTION_THRESHOLD = int(os.getenv("NPA_IDLE_PROMOTION_THRESHOLD", "8"))
+# Default seed for benchmark/evaluation reproducibility. Agents that want
+# stochastic training streams can set TRAFFIC_SEED = None at runtime.
+TRAFFIC_SEED = int(os.getenv("NPA_TRAFFIC_SEED", "2026"))
 
 CHATTER_RATIO = 0.80
 POWER_USER_RATIO = 0.20
@@ -47,11 +54,12 @@ PREEMPT_SWAP_VIP = -1.8
 
 REJECT_UNNECESSARY_FREE = -5.0
 REJECT_UNNECESSARY_VIP = -10.0
-REJECT_NECESSARY_FREE = -0.5
-REJECT_NECESSARY_VIP = -2.0
+REJECT_NECESSARY_FREE = -1.5
+REJECT_NECESSARY_VIP = -5.0
 
-SLA_MISS_FREE = -10.0
-SLA_MISS_VIP = -30.0
+# SLA penalty fires once at threshold crossing, not every tick.
+SLA_MISS_FREE = -2.0
+SLA_MISS_VIP = -6.0
 DEADLOCK_PENALTY = -20.0
 CRASH_PENALTY = -100.0
 
@@ -64,6 +72,8 @@ ACTIVE_GEN_BONUS = 0.02
 
 GC_IDLE_THRESHOLD = 200
 
+# Per-phase v1 ceilings calibrated against analytical throughput vs demand.
+# Used by scoring.compute_final_score to normalize completion ratio.
 PHASE_CONFIGS = {
     "easy": {
         "max_ticks": 2000,
@@ -72,6 +82,8 @@ PHASE_CONFIGS = {
         "sla_vip": None,
         "traffic_fn": "flat",
         "power_user_pct": 0.0,
+        "gen_per_tick": 15,
+        "v1_ceiling": 0.95,
     },
     "medium": {
         "max_ticks": 3000,
@@ -80,6 +92,8 @@ PHASE_CONFIGS = {
         "sla_vip": 50,
         "traffic_fn": "wave",
         "power_user_pct": 0.20,
+        "gen_per_tick": 5,
+        "v1_ceiling": 0.40,
     },
     "hard": {
         "max_ticks": 5000,
@@ -88,5 +102,7 @@ PHASE_CONFIGS = {
         "sla_vip": 25,
         "traffic_fn": "spike",
         "power_user_pct": 0.35,
+        "gen_per_tick": 5,
+        "v1_ceiling": 0.15,
     },
 }

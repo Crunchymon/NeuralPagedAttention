@@ -41,8 +41,16 @@ def generate_request(
     if prompt + gen > max_tokens:
         gen = max(16, max_tokens - prompt)
 
+    # Reusing an id from the returning pool is what lets the cache-hit path in
+    # _admit_next actually fire. _admit_next defends against the rare case where
+    # the same id is currently live on GPU (it rerolls a fresh uuid then).
+    if is_returning:
+        request_id = rng.choice(returning_pool)
+    else:
+        request_id = str(uuid.uuid4())[:8]
+
     return Request(
-        request_id=str(uuid.uuid4())[:8],
+        request_id=request_id,
         tier=tier,
         user_type=user_type,
         is_returning=is_returning,

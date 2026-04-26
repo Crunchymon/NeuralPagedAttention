@@ -30,17 +30,20 @@ def check_sla_violations(
     sla_free,
     sla_vip,
 ) -> float:
-    """Check queued requests for SLA timeout penalties."""
+    """SLA penalty fires once at threshold crossing (wait_ticks == sla_*),
+    not every subsequent tick. Combined with smaller per-violation magnitudes,
+    this prevents the O(queue * ticks) blow-up that previously dominated the
+    cumulative reward signal regardless of agent behavior."""
     penalty = 0.0
 
     if sla_free is not None:
         for req in free_queue:
-            if req.wait_ticks >= sla_free:
+            if req.wait_ticks == sla_free:
                 penalty += SLA_MISS_FREE
 
     if sla_vip is not None:
         for req in vip_queue:
-            if req.wait_ticks >= sla_vip:
+            if req.wait_ticks == sla_vip:
                 penalty += SLA_MISS_VIP
 
     return penalty
