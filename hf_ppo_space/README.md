@@ -54,7 +54,8 @@ the strongest model that fits comfortably on a 24 GB L4 under DDP without shardi
 | `PPO_SAVE_EVERY` | `0` | Save adapter every N episodes (0 = end only). |
 | `PPO_NO_4BIT` | `0` | Set `1` to disable BNB-4bit and use bf16 LoRA only (memory fallback). |
 | `PPO_SEED` | `42` | RNG seed. |
-| `OUTPUT_REPO_ID` | *(empty)* | Hub model repo to push the trained adapter, e.g. `your-user/npa-ppo`. Create the empty repo first. |
+| `OUTPUT_REPO_ID` | *(empty)* | Hub model repo to push the trained adapter **and training logs**, e.g. `your-user/npa-ppo`. Create the empty repo first. |
+| `LOG_UPLOAD_INTERVAL_SEC` | `60` | Seconds between in-flight log snapshot uploads to the Hub repo. |
 
 ## 3. What you get
 
@@ -65,8 +66,19 @@ contains:
 - `adapter_config.json` (records `base_model_name_or_path` so inference can pick the right base)
 - tokenizer files
 
-If `OUTPUT_REPO_ID` is set, the same folder also lands on the Hub at `OUTPUT_REPO_ID/ppo_lora_agent/`.
-Pull it down and place it next to [`ppo_agent.py`](../agents/UnslothPPOAgent/ppo_agent.py)
+If `OUTPUT_REPO_ID` is set, the same folder also lands on the Hub at `OUTPUT_REPO_ID/ppo_lora_agent/`,
+**along with the full training log under** `OUTPUT_REPO_ID/logs/<RUN_ID>/`:
+
+| File | Contents |
+| --- | --- |
+| `train.log` | Combined stdout from all 4 ranks, including per-tick lines, per-episode summaries, schedules, and any errors. Refreshed every 60 s during training, plus one guaranteed final upload at run end. |
+| `metrics.jsonl` | One JSON object per episode (`episode`, `task`, `ticks`, `crashed`, `final_score`, `completed/arrived`, `cum_step_return`, `entropy_coef`, `temperature`) plus `run_start` / `run_end` markers. Easy to load with `pandas.read_json(..., lines=True)`. |
+
+`<RUN_ID>` is the UTC timestamp at which the run started (e.g. `2026-04-26T12-30-00Z`),
+so re-running the Space appends a new `logs/<RUN_ID>/` folder rather than overwriting
+the previous run's log.
+
+Pull the adapter down and place it next to [`ppo_agent.py`](../agents/UnslothPPOAgent/ppo_agent.py)
 to evaluate locally:
 
 ```bash

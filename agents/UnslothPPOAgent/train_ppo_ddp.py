@@ -32,10 +32,12 @@ For local single-GPU debugging:
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import random
 import re
 import sys
+import time
 
 import torch
 import torch.nn.functional as F
@@ -143,6 +145,9 @@ def main() -> None:
     parser.add_argument("--no-4bit", action="store_true",
                         help="Disable BNB 4-bit; use bf16 LoRA only (memory fallback).")
     parser.add_argument("--output-dir", default=None)
+    parser.add_argument("--metrics-jsonl", default=None,
+                        help="Rank-0 appends one JSON object per episode to this file "
+                             "(useful for durable training-log analysis).")
     parser.add_argument("--dry-run", action="store_true",
                         help="Exit after imports + accelerator init (smoke test).")
     args = parser.parse_args()
@@ -239,10 +244,31 @@ def main() -> None:
 
     output_dir = args.output_dir or os.path.join(os.path.dirname(__file__), "ppo_lora_agent")
 
+    metrics_fh = None
+    if is_main and args.metrics_jsonl:
+        os.makedirs(os.path.dirname(os.path.abspath(args.metrics_jsonl)) or ".", exist_ok=True)
+        metrics_fh = open(args.metrics_jsonl, "a", encoding="utf-8")
+        metrics_fh.write(json.dumps({
+            "event": "run_start",
+            "ts": time.time(),
+            "model_name": args.model_name,
+            "episodes": args.episodes,
+            "world_size": world,
+            "lr": args.lr,
+            "entropy_coef": args.entropy_coef,
+            "max_ticks": args.max_ticks,
+            "curriculum_episodes": curriculum_eps,
+            "seed": args.seed,
+        }) + "\n")
+        metrics_fh.flush()
+
     if is_main:
         print(f"[*] Episodes={args.episodes} | curriculum_easy={curriculum_eps} | "
               f"lr={args.lr} | chunk={CHUNK_SIZE} | seed_rank0={args.seed}")
-        print(f"[*] Output dir: {output_dir}\n")
+        print(f"[*] Output dir: {output_dir}")
+        if metrics_fh is not None:
+            print(f"[*] Metrics JSONL: {args.metrics_jsonl}")
+        print()
 
     for episode in range(args.episodes):
         # Same task across all ranks (deterministic from seed+episode), uncorrelated traffic per rank.
@@ -377,6 +403,24 @@ def main() -> None:
                 flush=True,
             )
 
+            if metrics_fh is not None:
+                metrics_fh.write(json.dumps({
+                    "event": "episode_end",
+                    "ts": time.time(),
+                    "episode": episode,
+                    "task": current_task,
+                    "ticks": tick,
+                    "crashed": bool(env.crashed),
+                    "final_score": float(final_score),
+                    "completed": int(env.total_completed),
+                    "arrived": int(env.total_arrived),
+                    "completion_rate": float(done_rate),
+                    "cum_step_return": float(total_reward),
+                    "entropy_coef": float(entropy_coef),
+                    "temperature": float(temperature),
+                }) + "\n")
+                metrics_fh.flush()
+
         if args.save_every > 0 and (episode + 1) % args.save_every == 0:
             accelerator.wait_for_everyone()
             if is_main:
@@ -389,6 +433,10 @@ def main() -> None:
         print(f"\n[*] Final save → {output_dir}")
         accelerator.unwrap_model(model).save_pretrained(output_dir)
         tokenizer.save_pretrained(output_dir)
+        if metrics_fh is not None:
+            metrics_fh.write(json.dumps({"event": "run_end", "ts": time.time()}) + "\n")
+            metrics_fh.flush()
+            metrics_fh.close()
         print("[*] Done. Run agents/UnslothPPOAgent/ppo_agent.py to evaluate.")
 
 
