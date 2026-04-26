@@ -64,7 +64,7 @@ class KVCacheEnvironment:
         self.config = PHASE_CONFIGS[task]
         self.tick = 0
         self.episode_id = str(uuid.uuid4())[:12]
-        self.rng = random.Random(42)
+        self.rng = random.Random(constants.TRAFFIC_SEED) if constants.TRAFFIC_SEED is not None else random.Random()
 
         self.free_queue = []
         self.vip_queue = []
@@ -168,7 +168,12 @@ class KVCacheEnvironment:
         self.tick_max_tokens = 0
 
         traffic_fn = TRAFFIC_FNS[self.config["traffic_fn"]]
-        n_arrivals = traffic_fn(self.tick)
+        expected_arrivals = traffic_fn(self.tick)
+        
+        # Add randomness: expected +/- 1.5 * expected -> expected * [-0.5, 2.5]
+        # Since negative arrivals don't make sense, we clamp to 0
+        variation = self.rng.uniform(-1.5, 1.5)
+        n_arrivals = max(0, int(expected_arrivals * (1 + variation)))
 
         for _ in range(n_arrivals):
             req = generate_request(

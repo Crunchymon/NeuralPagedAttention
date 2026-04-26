@@ -197,6 +197,11 @@ components:
           - type: integer
           - type: 'null'
           title: Max Ticks Hard
+        traffic_seed:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Traffic Seed
       type: object
       title: SettingsRequest
     SimulationRequest:

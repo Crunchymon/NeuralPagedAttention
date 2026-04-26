@@ -41,6 +41,7 @@ class SettingsRequest(BaseModel):
     max_ticks_easy: Optional[int] = None
     max_ticks_medium: Optional[int] = None
     max_ticks_hard: Optional[int] = None
+    traffic_seed: Optional[int] = None
 
 @app.get(
     "/api/agents",
@@ -82,12 +83,14 @@ def get_settings():
             "GPU_TOTAL_BLOCKS": constants.GPU_TOTAL_BLOCKS,
             "CPU_TOTAL_BLOCKS": constants.CPU_TOTAL_BLOCKS,
             "TOKENS_PER_BLOCK": constants.TOKENS_PER_BLOCK,
+            "TRAFFIC_SEED": constants.TRAFFIC_SEED,
             "PHASE_CONFIGS": constants.PHASE_CONFIGS
         },
         "default_settings": {
             "GPU_TOTAL_BLOCKS": 1000,
             "CPU_TOTAL_BLOCKS": 5000,
             "TOKENS_PER_BLOCK": 16,
+            "TRAFFIC_SEED": None,
             "max_ticks_easy": 2000,
             "max_ticks_medium": 5000,
             "max_ticks_hard": 10000
@@ -107,6 +110,8 @@ def update_settings(req: SettingsRequest):
         constants.CPU_TOTAL_BLOCKS = req.cpu_total_blocks
     if req.tokens_per_block is not None:
         constants.TOKENS_PER_BLOCK = req.tokens_per_block
+    if req.traffic_seed is not None:
+        constants.TRAFFIC_SEED = req.traffic_seed
     
     if req.max_ticks_easy is not None:
         constants.PHASE_CONFIGS["easy"]["max_ticks"] = req.max_ticks_easy
@@ -121,12 +126,14 @@ def update_settings(req: SettingsRequest):
             "GPU_TOTAL_BLOCKS": constants.GPU_TOTAL_BLOCKS,
             "CPU_TOTAL_BLOCKS": constants.CPU_TOTAL_BLOCKS,
             "TOKENS_PER_BLOCK": constants.TOKENS_PER_BLOCK,
+            "TRAFFIC_SEED": constants.TRAFFIC_SEED,
             "PHASE_CONFIGS": constants.PHASE_CONFIGS
         },
         "default_settings": {
             "GPU_TOTAL_BLOCKS": 1000,
             "CPU_TOTAL_BLOCKS": 5000,
             "TOKENS_PER_BLOCK": 16,
+            "TRAFFIC_SEED": None,
             "max_ticks_easy": 2000,
             "max_ticks_medium": 3000,
             "max_ticks_hard": 5000
