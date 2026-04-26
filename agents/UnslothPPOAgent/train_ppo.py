@@ -16,6 +16,7 @@ import os
 import sys
 import re
 import torch
+import random
 
 # Path bootstrap to load environment
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
@@ -75,11 +76,15 @@ def main():
     # 4. Environment Rollout & Training Loop
     env = KVCacheEnvironment()
     
-    TRAINING_EPISODES = 5  # Start small for testing
+    TRAINING_EPISODES = 15  # Benchmark level
+    GRADIENT_ACCUMULATION_STEPS = 4
     
     print("\n[*] Starting REINFORCE Rollouts...\n")
+    running_baseline = 0.0
+    
     for episode in range(TRAINING_EPISODES):
-        obs_obj = env.reset("easy")
+        current_task = random.choice(["easy", "medium", "hard"])
+        obs_obj = env.reset(current_task)
         if obs_obj is None:
             continue
             
@@ -87,8 +92,9 @@ def main():
         done = False
         tick = 0
         total_reward = 0.0
+        optimizer.zero_grad()
         
-        while not done and tick < 100: # Limit ticks per episode for faster RL cycles
+        while not done and tick < 300: # Increased horizon to experience spikes
             # Format observation into prompt
             user_msg = build_user_prompt(obs, tick)
             
@@ -158,22 +164,29 @@ def main():
                 # Sum log probs over the response sequence
                 seq_log_prob = selected_log_probs.sum()
                 
-                # REINFORCE Objective: Loss = -log(prob) * reward
-                # If reward is positive, loss is negative -> gradients maximize the probability
-                # We add a simple baseline (e.g., mean reward) later, but standard works for now
-                loss = -seq_log_prob * reward
+                # Calculate Advantage using a running baseline to reduce variance
+                advantage = reward - running_baseline
+                running_baseline = 0.9 * running_baseline + 0.1 * reward
                 
-                # Backpropagate & Update
+                # REINFORCE Objective: Loss = -log(prob) * Advantage
+                loss = -seq_log_prob * advantage
+                
+                # Scale loss for gradient accumulation
+                loss = loss / GRADIENT_ACCUMULATION_STEPS
                 loss.backward()
-                optimizer.step()
-                optimizer.zero_grad()
                 
-                loss_val = loss.item()
+                if (tick + 1) % GRADIENT_ACCUMULATION_STEPS == 0:
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0) # Prevent gradient explosions
+                    optimizer.step()
+                    optimizer.zero_grad()
+                
+                loss_val = loss.item() * GRADIENT_ACCUMULATION_STEPS
             else:
                 loss_val = 0.0
             
             if tick % 10 == 0:
-                print(f"[EP {episode} | T{tick:3d}] Action: {action:2d} | Reward: {reward:5.2f} | Loss: {loss_val:.4f}")
+                adv_val = advantage if len(response_ids) > 0 else 0.0
+                print(f"[EP {episode} | {current_task.upper():<6s} | T{tick:3d}] Action: {action:2d} | Reward: {reward:5.2f} | Adv: {adv_val:6.2f} | Loss: {loss_val:.4f}")
             
             tick += 1
 
