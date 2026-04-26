@@ -47,3 +47,7 @@ dist/
 # Server cache (explicit safety)
 server/__pycache__/
 server/env_components/__pycache__/
+
+# Isolated PPO training repo (lives in this workspace but is its own git repo;
+# never tracked by the env repo). See npa-ppo-train/README.md.
+npa-ppo-train/
