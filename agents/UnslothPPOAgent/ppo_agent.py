@@ -44,12 +44,21 @@ class PPOAgent:
 
         if self.use_mlx:
             import mlx_lm
+            from mlx_lm.tuner.utils import load_adapters
             print(f"[*] Loading base model and tokenizer via mlx_lm...")
             
             # Check if adapter exists
             if os.path.exists(ADAPTER_PATH):
-                print(f"[*] Found LoRA Adapter at {ADAPTER_PATH}! Loading with adapter...")
-                self.model, self.tokenizer = mlx_lm.load(MODEL_NAME, adapter_path=ADAPTER_PATH)
+                print(f"[*] Found LoRA Adapter at {ADAPTER_PATH}! Loading and patching MLX model...")
+                self.model, self.tokenizer = mlx_lm.load(MODEL_NAME)
+                
+                # Monkey-patch config to fix mlx-lm LoRA bug for Qwen2
+                if hasattr(self.model, "args"):
+                    if not hasattr(self.model.args, "num_layers") and hasattr(self.model.args, "num_hidden_layers"):
+                        setattr(self.model.args, "num_layers", self.model.args.num_hidden_layers)
+                
+                # Inject adapters
+                self.model = load_adapters(self.model, ADAPTER_PATH)
             else:
                 print(f"[!] Warning: No adapter found at {ADAPTER_PATH}. Falling back to base model.")
                 self.model, self.tokenizer = mlx_lm.load(MODEL_NAME)
