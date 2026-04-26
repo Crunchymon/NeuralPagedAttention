@@ -144,14 +144,68 @@ class DQNAgent:
         if self.steps_done % self.target_update_freq == 0:
             self.target_net.load_state_dict(self.policy_net.state_dict())
 
+    def save(self, filepath):
+        torch.save(self.policy_net.state_dict(), filepath)
+
+    def load(self, filepath):
+        if os.path.exists(filepath):
+            self.policy_net.load_state_dict(torch.load(filepath, map_location=self.device))
+            self.target_net.load_state_dict(self.policy_net.state_dict())
+            self.epsilon = 0.01  # Exploit mode
+            print(f"[*] Loaded pretrained weights from {filepath}. Set epsilon to 0.01.")
+            return True
+        return False
+
+
+def train_offline():
+    env = LocalEnv()
+    agent = DQNAgent()
+    
+    print("\n" + "="*60)
+    print(" NEURAL NETWORK AGENT (DQN) OFFLINE TRAINING")
+    print("="*60 + "\n")
+    
+    TRAINING_EPISODES = 50
+    for episode in range(TRAINING_EPISODES):
+        current_task = random.choice(["easy", "medium", "hard"])
+        obs = env.reset(current_task)
+        if obs is None: continue
+        
+        env.env.config["max_ticks"] = 500  # Cap at 500 for faster RL cycles
+        
+        total_reward = 0
+        ticks_run = 0
+        done = False
+        
+        while not done:
+            action = agent.select_action(obs)
+            next_obs, reward, done, info = env.step(action)
+            if next_obs is None: break
+            
+            agent.memory.push(obs, action, reward, next_obs, done)
+            agent.train()
+            
+            obs = next_obs
+            total_reward += reward
+            ticks_run += 1
+            
+            if ticks_run % 100 == 0 or done:
+                print(f"[EP {episode+1:2d}/{TRAINING_EPISODES} | {current_task.upper():<6s}] Tick {ticks_run:3} | Reward: {total_reward:7.2f} | Eps: {agent.epsilon:.3f}")
+                
+    weights_path = os.path.join(os.path.dirname(__file__), "dqn_weights.pth")
+    agent.save(weights_path)
+    print(f"\n[*] Offline Training Complete! Saved weights to {weights_path}")
 
 # ---------------- API RUNNER ---------------- #
 def run_sim(task=None, ticks=None):
     env = LocalEnv()
     agent = DQNAgent()
 
+    weights_path = os.path.join(os.path.dirname(__file__), "dqn_weights.pth")
+    is_inference = agent.load(weights_path)
+
     print("\n" + "="*60)
-    print(" NEURAL NETWORK AGENT (DQN) TRAINING")
+    print(f" NEURAL NETWORK AGENT (DQN) {'INFERENCE' if is_inference else 'ONLINE TRAINING'}")
     print("="*60 + "\n")
 
     all_tick_logs = []
@@ -190,8 +244,9 @@ def run_sim(task=None, ticks=None):
             next_obs, reward, done, info = env.step(action)
             if next_obs is None: break
 
-            agent.memory.push(obs, action, reward, next_obs, done)
-            agent.train()
+            if not is_inference:
+                agent.memory.push(obs, action, reward, next_obs, done)
+                agent.train()
 
             obs_dict = dict(zip(keys, obs))
             log_entry = {
@@ -242,5 +297,13 @@ def run_sim(task=None, ticks=None):
     return all_tick_logs, all_session_logs
 
 if __name__ == "__main__":
-    task_arg = sys.argv[1] if len(sys.argv) > 1 else None
-    run_sim(task=task_arg)
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--train", action="store_true", help="Run offline pre-training")
+    parser.add_argument("--task", type=str, default=None, help="Specific task to run simulation for")
+    args = parser.parse_args()
+    
+    if args.train:
+        train_offline()
+    else:
+        run_sim(task=args.task)
