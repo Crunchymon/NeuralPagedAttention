@@ -90,8 +90,6 @@ def get_settings():
             "GPU_TOTAL_BLOCKS": 1000,
             "CPU_TOTAL_BLOCKS": 5000,
             "TOKENS_PER_BLOCK": 16,
-            "TRAFFIC_SEED": None,
-            "max_ticks_easy": 2000,
             "max_ticks_medium": 5000,
             "max_ticks_hard": 10000
         }
