@@ -76,11 +76,12 @@ def main():
     # 4. Environment Rollout & Training Loop
     env = KVCacheEnvironment()
     
-    TRAINING_EPISODES = 15  # Benchmark level
+    TRAINING_EPISODES = 30  # High-quality benchmark level
     GRADIENT_ACCUMULATION_STEPS = 4
     
     print("\n[*] Starting REINFORCE Rollouts...\n")
     running_baseline = 0.0
+    running_variance = 1.0
     
     for episode in range(TRAINING_EPISODES):
         current_task = random.choice(["easy", "medium", "hard"])
@@ -167,9 +168,19 @@ def main():
                 # Calculate Advantage using a running baseline to reduce variance
                 advantage = reward - running_baseline
                 running_baseline = 0.9 * running_baseline + 0.1 * reward
+                running_variance = 0.9 * running_variance + 0.1 * (advantage ** 2)
                 
-                # REINFORCE Objective: Loss = -log(prob) * Advantage
-                loss = -seq_log_prob * advantage
+                # Normalize advantage to stabilize gradients
+                norm_advantage = advantage / (max(1e-8, running_variance ** 0.5))
+                
+                # Entropy bonus to prevent premature convergence (Encourages exploration)
+                # Dynamic entropy coefficient: high early on, decaying to 0.01
+                entropy_coef = max(0.01, 0.05 * (1.0 - episode / TRAINING_EPISODES))
+                probs = torch.softmax(logits, dim=-1)
+                entropy = -(probs * log_probs).sum(dim=-1).mean()
+                
+                # PPO-style Policy Gradient Loss + Entropy Regularization
+                loss = -seq_log_prob * norm_advantage - entropy_coef * entropy
                 
                 # Scale loss for gradient accumulation
                 loss = loss / GRADIENT_ACCUMULATION_STEPS
