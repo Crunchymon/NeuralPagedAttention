@@ -1,30 +1,39 @@
 """
-train_ppo.py — Unsloth + PPO Reinforcement Learning for the LLM Agent.
+train_ppo.py — Policy gradient (REINFORCE-style) training for the LLM agent with Unsloth.
 
-IMPORTANT HARDWARE NOTE:
-This script relies on `unsloth` which requires an NVIDIA GPU (Linux or Windows WSL).
-You CANNOT run this script natively on an Apple Silicon Mac.
-Please upload your project to Google Colab, RunPod, or a similar cloud GPU service to train.
+Requires NVIDIA GPU + unsloth for 4-bit training. On Apple Silicon, use a cloud GPU
+or run `python train_ppo.py --dry-run` to validate imports only.
 
-Usage on Colab (T4 / A100):
-  pip install -r requirements.txt
-  pip install unsloth trl peft
-  python3 agents/UnslothPPOAgent/train_ppo.py
+Improvements over the original:
+  - Always calls env.step so the simulator never stalls on bad LLM output
+  - Chunked discounted returns + one backward per chunk (stable, bounded memory)
+  - Same batch-admit heuristic as LRU/PPO inference so the policy focuses on pressure actions
+  - Configurable horizons, learning rate, entropy
 """
 
-import os
-import sys
-import re
-import torch
-import random
+from __future__ import annotations
 
-# Path bootstrap to load environment
+import argparse
+import os
+import re
+import sys
+
+import random
+import torch
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+
+import server.env_components.constants as constants
 from server.environment import KVCacheEnvironment
-from agents.LLMAgent.prompts import build_user_prompt, SYSTEM_PROMPT
+from agents.LLMAgent.prompts import SYSTEM_PROMPT, build_user_prompt
 
 MODEL_NAME = "Qwen/Qwen2.5-1.5B-Instruct"
 MAX_SEQ_LENGTH = 1024
+PARSE_FAIL_EXTRA = -2.0
+CHUNK_SIZE = 24
+GAMMA = 0.99
+MAX_GRAD_NORM = 1.0
+
 
 def parse_action(text: str) -> int | None:
     matches = re.findall(r"\b(\d{1,2})\b", text)
@@ -34,72 +43,141 @@ def parse_action(text: str) -> int | None:
             return val
     return None
 
+
+def pre_step_admit(env: KVCacheEnvironment) -> None:
+    gpu_util = env.ledger.gpu_utilization()
+    free_q = len(env.free_queue)
+    vip_q = len(env.vip_queue)
+    if gpu_util < 0.85 and (vip_q > 0 or free_q > 0):
+        pct = max(0.0, (constants.GPU_TOTAL_BLOCKS - env.ledger.gpu_used) / constants.GPU_TOTAL_BLOCKS)
+        if vip_q > 0:
+            env.admit_batch("vip", pct)
+        if free_q > 0:
+            env.admit_batch("free", pct)
+
+
+def compute_logprob_entropy(model, tokenizer, output_ids, prompt_len):
+    """Forward pass on full sequence; return (seq_log_prob, mean_entropy)."""
+    outputs = model(output_ids, use_cache=False)
+    logits = outputs.logits[0, prompt_len - 1 : -1, :]
+    response_ids = output_ids[0, prompt_len:].clone()
+    if response_ids.numel() == 0:
+        return None, None
+    log_probs = torch.log_softmax(logits, dim=-1)
+    probs = torch.softmax(logits, dim=-1)
+    entropy = -(probs * log_probs).sum(dim=-1)
+    selected = log_probs.gather(dim=-1, index=response_ids.unsqueeze(-1)).squeeze(-1)
+    seq_log_prob = selected.sum()
+    return seq_log_prob, entropy.mean()
+
+
+def flush_chunk(
+    buf: list[tuple[torch.Tensor, torch.Tensor, float]],
+    model,
+    optimizer,
+    entropy_coef: float,
+) -> float:
+    """Discounted returns over chunk; policy loss = -sum R_t * log pi_t."""
+    if not buf:
+        return 0.0
+    rewards = [b[2] for b in buf]
+    R = 0.0
+    returns: list[float] = []
+    for r in reversed(rewards):
+        R = float(r) + GAMMA * R
+        returns.insert(0, R)
+    returns_t = torch.tensor(returns, device=buf[0][0].device, dtype=torch.float32)
+    returns_t = (returns_t - returns_t.mean()) / (returns_t.std().clamp(min=1e-6))
+
+    loss = torch.zeros((), device=buf[0][0].device)
+    ent_acc = []
+    for i, (lp, ent, _) in enumerate(buf):
+        loss = loss - returns_t[i].detach() * lp
+        ent_acc.append(ent)
+    loss = loss / len(buf) - entropy_coef * torch.stack(ent_acc).mean()
+
+    loss.backward()
+    torch.nn.utils.clip_grad_norm_(model.parameters(), MAX_GRAD_NORM)
+    optimizer.step()
+    optimizer.zero_grad(set_to_none=True)
+    return float(loss.item())
+
+
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--episodes", type=int, default=80)
+    parser.add_argument("--max-ticks", type=int, default=0, help="Cap ticks per episode (0 = use task default)")
+    parser.add_argument("--lr", type=float, default=2e-5)
+    parser.add_argument("--entropy-coef", type=float, default=0.04)
+    parser.add_argument("--dry-run", action="store_true", help="Exit after imports (no GPU)")
+    args = parser.parse_args()
+
     try:
         from unsloth import FastLanguageModel
     except ImportError:
-        print("[!] Missing dependencies. Please run: pip install unsloth")
+        print("[!] Missing unsloth. Install on Linux/WSL/CUDA: pip install unsloth")
         sys.exit(1)
 
-    print("="*60)
-    print("  UNSLOTH REINFORCE (POLICY GRADIENT) TRAINING INITIALIZATION")
-    print("="*60)
+    if args.dry_run:
+        print("[*] Dry run OK (unsloth import succeeded).")
+        return
 
-    # 1. Load Unsloth Model in 4-bit for extreme memory efficiency
+    print("=" * 60)
+    print("  LLM POLICY GRADIENT (chunked REINFORCE + LoRA)")
+    print("=" * 60)
+
     print("[*] Loading Unsloth FastLanguageModel...")
     model, tokenizer = FastLanguageModel.from_pretrained(
-        model_name = MODEL_NAME,
-        max_seq_length = MAX_SEQ_LENGTH,
-        dtype = None,
-        load_in_4bit = True,
+        model_name=MODEL_NAME,
+        max_seq_length=MAX_SEQ_LENGTH,
+        dtype=None,
+        load_in_4bit=True,
     )
 
-    # 2. Apply LoRA Adapters
-    print("[*] Injecting LoRA Adapters...")
+    print("[*] Injecting LoRA...")
     model = FastLanguageModel.get_peft_model(
         model,
-        r = 16,
-        target_modules = ["q_proj", "k_proj", "v_proj", "o_proj",
-                          "gate_proj", "up_proj", "down_proj"],
-        lora_alpha = 16,
-        lora_dropout = 0,
-        bias = "none",
-        use_gradient_checkpointing = "unsloth",
-        random_state = 3407,
+        r=16,
+        target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
+        lora_alpha=32,
+        lora_dropout=0.05,
+        bias="none",
+        use_gradient_checkpointing="unsloth",
+        random_state=3407,
     )
 
-    # 3. Setup Pure PyTorch Optimizer (Bypassing TRL completely)
-    print("[*] Setting up AdamW Optimizer for Policy Gradient...")
-    from torch.optim import AdamW
-    optimizer = AdamW(model.parameters(), lr=1e-5)
+    device = next(model.parameters()).device
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=0.01)
+    model.train()
 
-    # 4. Environment Rollout & Training Loop
     env = KVCacheEnvironment()
-    
-    TRAINING_EPISODES = 30  # High-quality benchmark level
-    GRADIENT_ACCUMULATION_STEPS = 4
-    
-    print("\n[*] Starting REINFORCE Rollouts...\n")
-    running_baseline = 0.0
-    running_variance = 1.0
-    
+    TRAINING_EPISODES = args.episodes
+
+    print(f"\n[*] Starting training: {TRAINING_EPISODES} episodes | lr={args.lr} | chunk={CHUNK_SIZE}\n")
+
     for episode in range(TRAINING_EPISODES):
         current_task = random.choice(["easy", "medium", "hard"])
         obs_obj = env.reset(current_task)
         if obs_obj is None:
             continue
-            
+
+        max_t = env.config["max_ticks"]
+        if args.max_ticks > 0:
+            max_t = min(max_t, args.max_ticks)
+
         obs = obs_obj.to_array()
         done = False
         tick = 0
         total_reward = 0.0
-        optimizer.zero_grad()
-        
-        while not done and tick < 300: # Increased horizon to experience spikes
-            # Format observation into prompt
+        chunk_buf: list[tuple[torch.Tensor, torch.Tensor, float]] = []
+
+        entropy_coef = max(0.01, float(args.entropy_coef) * (1.0 - episode / max(TRAINING_EPISODES, 1)))
+
+        optimizer.zero_grad(set_to_none=True)
+
+        while not done and tick < max_t:
+            pre_step_admit(env)
             user_msg = build_user_prompt(obs, tick)
-            
-            # Use Qwen Chat Template
             messages = [
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": user_msg},
@@ -108,107 +186,77 @@ def main():
                 prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
             else:
                 prompt = f"{SYSTEM_PROMPT}\n\n{user_msg}"
-                
-            inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
+
+            inputs = tokenizer(prompt, return_tensors="pt").to(device)
             prompt_len = inputs["input_ids"].shape[1]
-            
-            # --- PHASE 1: Generate Action (No Gradients) ---
+
             with torch.no_grad():
                 output_ids = model.generate(
-                    **inputs, 
-                    max_new_tokens=8, 
-                    do_sample=True, 
-                    top_p=0.9, 
-                    temperature=0.7, 
+                    **inputs,
+                    max_new_tokens=8,
+                    do_sample=True,
+                    top_p=0.92,
+                    temperature=0.75,
                     pad_token_id=tokenizer.eos_token_id,
-                    use_cache=False
+                    use_cache=False,
                 )
-            
-            # Clone to detach from no_grad/inference mode so Autograd doesn't complain during backprop
+
             output_ids = output_ids.clone()
             response_ids = output_ids[0][prompt_len:].clone()
-            
-            # Skip if model produced empty response
-            if len(response_ids) == 0:
-                print(f"    [!] Empty generation at tick {tick}. Skipping update.")
-                action = 17; reward = -5.0
+
+            parse_penalty = 0.0
+            if response_ids.numel() == 0:
+                action = 17
+                parse_penalty = PARSE_FAIL_EXTRA
             else:
                 response_str = tokenizer.decode(response_ids, skip_special_tokens=True).strip()
-                
-                # --- PHASE 2: Step Environment ---
-                action = parse_action(response_str)
-                if action is None:
-                    action = 17 # Idle
-                    reward = -5.0 # Harsh penalty for hallucinating / bad formatting
-                    print(f"    [!] Hallucination penalty applied. Output: '{response_str}'")
+                parsed = parse_action(response_str)
+                if parsed is None:
+                    action = 17
+                    parse_penalty = PARSE_FAIL_EXTRA
                 else:
-                    obs_obj, reward, done, _ = env.step(action)
-                    obs = obs_obj.to_array() if obs_obj else None
-                
+                    action = parsed
+
+            seq_log_prob, ent_mean = compute_logprob_entropy(model, tokenizer, output_ids, prompt_len)
+            if seq_log_prob is None:
+                obs_obj, reward, done, _ = env.step(action)
+                reward = float(reward) + parse_penalty
+                total_reward += reward
+                obs = obs_obj.to_array() if obs_obj else obs
+                tick += 1
+                continue
+
+            obs_obj, reward, done, _ = env.step(action)
+            reward = float(reward) + parse_penalty
+            obs = obs_obj.to_array() if obs_obj else obs
             total_reward += reward
-            
-            # --- PHASE 3: Policy Gradient Update (WITH Gradients) ---
-            if len(response_ids) > 0:
-                # Forward pass on the full sequence to get logits (disable cache for training)
-                outputs = model(output_ids, use_cache=False)
-                
-                # Logits shifted by 1 to align with labels
-                # We want the logits that predict the response_ids
-                logits = outputs.logits[0, prompt_len-1 : -1, :] # Shape: (response_len, vocab_size)
-                
-                # Compute log probabilities of the actual generated tokens
-                log_probs = torch.log_softmax(logits, dim=-1)
-                
-                # Gather the log prob of the specific chosen token IDs
-                selected_log_probs = log_probs.gather(dim=-1, index=response_ids.unsqueeze(-1)).squeeze(-1)
-                
-                # Sum log probs over the response sequence
-                seq_log_prob = selected_log_probs.sum()
-                
-                # Calculate Advantage using a running baseline to reduce variance
-                advantage = reward - running_baseline
-                running_baseline = 0.9 * running_baseline + 0.1 * reward
-                running_variance = 0.9 * running_variance + 0.1 * (advantage ** 2)
-                
-                # Normalize advantage to stabilize gradients
-                norm_advantage = advantage / (max(1e-8, running_variance ** 0.5))
-                
-                # Entropy bonus to prevent premature convergence (Encourages exploration)
-                # Dynamic entropy coefficient: high early on, decaying to 0.01
-                entropy_coef = max(0.01, 0.05 * (1.0 - episode / TRAINING_EPISODES))
-                probs = torch.softmax(logits, dim=-1)
-                entropy = -(probs * log_probs).sum(dim=-1).mean()
-                
-                # PPO-style Policy Gradient Loss + Entropy Regularization
-                loss = -seq_log_prob * norm_advantage - entropy_coef * entropy
-                
-                # Scale loss for gradient accumulation
-                loss = loss / GRADIENT_ACCUMULATION_STEPS
-                loss.backward()
-                
-                if (tick + 1) % GRADIENT_ACCUMULATION_STEPS == 0:
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0) # Prevent gradient explosions
-                    optimizer.step()
-                    optimizer.zero_grad()
-                
-                loss_val = loss.item() * GRADIENT_ACCUMULATION_STEPS
-            else:
-                loss_val = 0.0
-            
-            if tick % 10 == 0:
-                adv_val = advantage if len(response_ids) > 0 else 0.0
-                print(f"[EP {episode} | {current_task.upper():<6s} | T{tick:3d}] Action: {action:2d} | Reward: {reward:5.2f} | Adv: {adv_val:6.2f} | Loss: {loss_val:.4f}")
-            
+
+            r_clip = max(-40.0, min(40.0, reward))
+            chunk_buf.append((seq_log_prob, ent_mean, r_clip))
+
+            if len(chunk_buf) >= CHUNK_SIZE:
+                flush_chunk(chunk_buf, model, optimizer, entropy_coef)
+                chunk_buf = []
+
+            if tick % 12 == 0:
+                print(
+                    f"[EP {episode} | {current_task.upper():<6} | T{tick:4}] "
+                    f"action={action:2} | r={reward:6.2f} | total={total_reward:8.1f}"
+                )
+
             tick += 1
 
-        print(f"\n[✓] Episode {episode} Complete | Total Reward: {total_reward:.2f}\n" + "-"*50)
+        if chunk_buf:
+            flush_chunk(chunk_buf, model, optimizer, entropy_coef)
 
-    # 5. Save the trained LoRA adapter
+        print(f"\n[✓] Episode {episode} | {current_task} | ticks={tick} | return={total_reward:.2f}\n" + "-" * 50)
+
     output_dir = os.path.join(os.path.dirname(__file__), "ppo_lora_agent")
-    print(f"[*] Training complete! Saving LoRA adapter to: {output_dir}")
+    print(f"[*] Saving LoRA adapter to: {output_dir}")
     model.save_pretrained(output_dir)
     tokenizer.save_pretrained(output_dir)
-    print("[*] Done. You can now use ppo_agent.py on your Mac to run inference with this adapter!")
+    print("[*] Done. Run ppo_agent.py to evaluate.")
+
 
 if __name__ == "__main__":
     main()
