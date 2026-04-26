@@ -116,7 +116,9 @@ def main():
                     pad_token_id=tokenizer.eos_token_id
                 )
             
-            response_ids = output_ids[0][prompt_len:]
+            # Clone to detach from no_grad/inference mode so Autograd doesn't complain during backprop
+            output_ids = output_ids.clone()
+            response_ids = output_ids[0][prompt_len:].clone()
             
             # Skip if model produced empty response
             if len(response_ids) == 0:
