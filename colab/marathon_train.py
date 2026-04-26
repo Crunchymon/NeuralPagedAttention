@@ -57,8 +57,7 @@ def main() -> None:
         print("=" * 70)
         cmd = [
             py,
-            os.path.join(root, "agents", "NeuralAgent", "dqn.py"),
-            "--train",
+            os.path.join(root, "train_dqn.py"),
             "--episodes",
             str(args.dqn_episodes),
             "--eval-every",
