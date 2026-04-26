@@ -40,7 +40,7 @@ from agents.LLMAgent.prompts import SYSTEM_PROMPT, build_user_prompt
 # Constants
 # ---------------------------------------------------------------------------
 
-MODEL_NAME       = "Qwen/Qwen2.5-3B-Instruct"
+MODEL_NAME       = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
 MAX_NEW_TOKENS   = 8      # LLM only needs to output one 1-2 digit number
 FALLBACK_TIMEOUT = 10.0   # seconds — fall back to heuristic if inference takes longer
 VALID_ACTIONS    = set(range(18))

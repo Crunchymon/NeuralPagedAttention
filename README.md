@@ -97,6 +97,6 @@ docker run -p 7860:7860 neural-paged-attention
 ## Running Inference
 ```bash
 export HF_TOKEN=your_token
-export MODEL_NAME=Qwen/Qwen2.5-72B-Instruct
+export MODEL_NAME=TinyLlama/TinyLlama-1.1B-Chat-v1.0
 python inference.py
 ```
