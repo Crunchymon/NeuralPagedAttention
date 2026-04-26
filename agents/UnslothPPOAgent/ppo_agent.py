@@ -76,6 +76,13 @@ class PPOAgent:
             
             if os.path.exists(ADAPTER_PATH):
                 print(f"[*] Found LoRA Adapter! Injecting...")
+                
+                # PEFT expects adapter_model.safetensors, but we renamed it to adapters.safetensors for MLX
+                mlx_file = os.path.join(ADAPTER_PATH, "adapters.safetensors")
+                peft_file = os.path.join(ADAPTER_PATH, "adapter_model.safetensors")
+                if os.path.exists(mlx_file) and not os.path.exists(peft_file):
+                    os.symlink("adapters.safetensors", peft_file)
+                
                 self.model = PeftModel.from_pretrained(self.model, ADAPTER_PATH)
             else:
                 print(f"[!] Warning: No adapter found at {ADAPTER_PATH}.")
@@ -149,7 +156,7 @@ class PPOAgent:
                 return val
         return None
 
-def run_sim(task: str | None = None, ticks: int | None = None):
+def run_sim(task: str | None = None, ticks: int | None = None) -> tuple[list, list]:
     env = LocalEnv()
     agent = PPOAgent()
 
@@ -157,15 +164,32 @@ def run_sim(task: str | None = None, ticks: int | None = None):
     print("  UNSLOTH PPO AGENT SIMULATION")
     print("=" * 60 + "\n")
 
+    keys = [
+        "gpu_utilization_pct", "cpu_utilization_pct", "memory_pressure_trend",
+        "total_free_req",      "total_vip_req",        "total_req",
+        "free_max_wait_time_pct", "vip_max_wait_time_pct", "yield_preempt_active",
+        "free_size_max",  "free_size_mean",  "free_size_std_dev",
+        "vip_size_max",   "vip_size_mean",   "vip_size_std_dev",
+        "free_age_max",   "free_age_mean",   "free_age_std_dev",
+        "vip_age_max",    "vip_age_mean",    "vip_age_std_dev",
+    ]
+
     tasks_to_run = ["easy", "medium", "hard"] if task is None else [task]
+    all_tick_logs: list[dict] = []
+    all_session_logs: list[dict] = []
     
     for current_task in tasks_to_run:
+        session_id = str(uuid.uuid4())
         obs = env.reset(current_task)
         if obs is None: continue
+
+        if ticks is not None:
+            env.env.config["max_ticks"] = ticks
         
         total_reward = 0.0
         ticks_run = 0
         done = False
+        logs: list[dict] = []
 
         while not done:
             # Pre-step batch admit
@@ -178,18 +202,64 @@ def run_sim(task: str | None = None, ticks: int | None = None):
             action = agent.select_action(obs, tick=ticks_run)
             action_name = ACTION_MAP.get(action, "Unknown")
 
-            obs, reward, done, _ = env.step(action)
-            if obs is None: break
+            obs, reward, done, info = env.step(action)
+            if obs is None: 
+                done = True
+                break
 
             total_reward += reward
             ticks_run += 1
+
+            obs_dict = dict(zip(keys, obs))
+            log_entry = {
+                "task":       current_task,
+                "tick":       ticks_run,
+                "session_id": session_id,
+                "action":     action_name,
+                "reward":     round(reward, 2),
+                "score":      round(total_reward, 2),
+                "episode":    1,
+                "tick_prompt_tokens": info.get("tick_prompt_tokens", 0) if info else 0,
+                "tick_gen_tokens":    info.get("tick_gen_tokens",    0) if info else 0,
+                "tick_max_tokens":    info.get("tick_max_tokens",    0) if info else 0,
+                **obs_dict,
+            }
+            logs.append(log_entry)
 
             print(
                 f"[{current_task.upper()} T{ticks_run:4}] "
                 f"{action_name:35} | R {reward:+7.2f} | Total {total_reward:9.2f} | GPU {obs[0]:.2f}"
             )
 
-        print(f"\n[✓] {current_task.upper()} Score: {total_reward:.2f} | Parse failures: {agent.parse_failures}\n" + "-" * 60)
+        final_score = compute_final_score(
+            task=current_task,
+            total_completed=env.env.total_completed,
+            total_arrived=env.env.total_arrived,
+            per_request_fluency=env.env._per_request_fluency,
+            total_cache_hits=env.env.total_cache_hits,
+            total_returning_arrived=env.env.total_returning_arrived,
+            total_swaps=env.env.total_swaps,
+            total_actions=env.env.total_actions,
+        )
+
+        session_log = {
+            "session_id":       session_id,
+            "task":             current_task,
+            "episode":          1,
+            "total_reward":     total_reward,
+            "final_score":      final_score,
+            "ticks_run":        ticks_run,
+            "total_arrived":    env.env.total_arrived,
+            "total_completed":  env.env.total_completed,
+            "crashed":          getattr(env.env, "crashed", False),
+            "parse_failures":   agent.parse_failures,
+        }
+        all_session_logs.append(session_log)
+        all_tick_logs.extend(logs)
+
+        print(f"\n[✓] {current_task.upper()} Score: {total_reward:.2f} | Env Score: {final_score:.3f} | Parse failures: {agent.parse_failures}\n" + "-" * 60)
+
+    return all_tick_logs, all_session_logs
 
 if __name__ == "__main__":
     task_arg = sys.argv[1] if len(sys.argv) > 1 else None
