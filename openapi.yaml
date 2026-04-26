@@ -205,7 +205,7 @@ components:
           type: string
           title: Agent
           description: The name of the agent to run. Must be either 'lru', 'random',
-            'qlearning', or 'neural'.
+            'qlearning', 'neural', 'llm', or 'ppo'.
         task:
           anyOf:
           - type: string
@@ -274,4 +274,3 @@ components:
           title: Action Id
       type: object
       title: _LegacyStepRequest
-
