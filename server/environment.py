@@ -168,7 +168,7 @@ class KVCacheEnvironment:
         self.tick_max_tokens = 0
 
         traffic_fn = TRAFFIC_FNS[self.config["traffic_fn"]]
-        n_arrivals = traffic_fn(self.tick) * 5
+        n_arrivals = traffic_fn(self.tick)
 
         for _ in range(n_arrivals):
             req = generate_request(
