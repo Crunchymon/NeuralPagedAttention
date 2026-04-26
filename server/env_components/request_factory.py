@@ -22,7 +22,6 @@ def generate_request(
     power_user_pct: float,
     returning_pool: list[str],
     rng: random.Random,
-    request_id: str | None = None,
 ) -> Request:
     tier = "vip" if rng.random() < vip_ratio else "free"
 
@@ -43,7 +42,7 @@ def generate_request(
         gen = max(16, max_tokens - prompt)
 
     return Request(
-        request_id=request_id or str(uuid.uuid4())[:8],
+        request_id=str(uuid.uuid4())[:8],
         tier=tier,
         user_type=user_type,
         is_returning=is_returning,

@@ -17,8 +17,8 @@ class LocalEnv:
         self.env = KVCacheEnvironment()
         print("[*] Optimized Learning Agent (Stable RL)")
 
-    def reset(self, task="easy", seed=None, traffic_trace=None):
-        obs = self.env.reset(task, seed=seed, traffic_trace=traffic_trace)
+    def reset(self, task="easy"):
+        obs = self.env.reset(task)
         return obs.to_array()
 
     def step(self, action):
@@ -128,7 +128,7 @@ import uuid
 
 # ---------------- RUN ---------------- #
 
-def run_sim(task=None, ticks=None, seed=None, traffic_trace=None):
+def run_sim(task=None, ticks=None):
     env = LocalEnv()
     agent = OptimizedQLearningAgent()
 
@@ -169,7 +169,7 @@ def run_sim(task=None, ticks=None, seed=None, traffic_trace=None):
 
     for current_task in tasks_to_run:
         sessionID = str(uuid.uuid4())
-        obs = env.reset(current_task, seed=seed, traffic_trace=traffic_trace)
+        obs = env.reset(current_task)
         if ticks is not None:
             env.env.config["max_ticks"] = ticks
             

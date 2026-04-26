@@ -40,7 +40,7 @@ from agents.LLMAgent.prompts import SYSTEM_PROMPT, build_user_prompt
 # Constants
 # ---------------------------------------------------------------------------
 
-MODEL_NAME       = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+MODEL_NAME       = "Qwen/Qwen2.5-3B-Instruct"
 MAX_NEW_TOKENS   = 8      # LLM only needs to output one 1-2 digit number
 FALLBACK_TIMEOUT = 10.0   # seconds — fall back to heuristic if inference takes longer
 VALID_ACTIONS    = set(range(18))
@@ -61,10 +61,10 @@ class LocalEnv:
         self.env = KVCacheEnvironment()
         print("[*] LLMAgent: Using Local Environment")
 
-    def reset(self, task: str = "easy", seed: int | None = None, traffic_trace: list[list[dict]] | None = None) -> list[float] | None:
+    def reset(self, task: str = "easy") -> list[float] | None:
         """Reset the environment and return the initial observation array."""
         try:
-            obs_obj = self.env.reset(task, seed=seed, traffic_trace=traffic_trace)
+            obs_obj = self.env.reset(task)
             return obs_obj.to_array() if obs_obj is not None else None
         except Exception as exc:
             print(f"[!] Reset error: {exc}")
@@ -347,7 +347,7 @@ class LLMAgent:
 # Run Simulation (public API — matches all other agents)
 # ---------------------------------------------------------------------------
 
-def run_sim(task: str | None = None, ticks: int | None = None, seed: int | None = None, traffic_trace: list[list[dict]] | None = None) -> tuple[list, list]:
+def run_sim(task: str | None = None, ticks: int | None = None) -> tuple[list, list]:
     """
     Run the LLM agent simulation for the given task difficulty.
 
@@ -384,7 +384,7 @@ def run_sim(task: str | None = None, ticks: int | None = None, seed: int | None 
 
     for current_task in tasks_to_run:
         session_id = str(uuid.uuid4())
-        obs = env.reset(current_task, seed=seed, traffic_trace=traffic_trace)
+        obs = env.reset(current_task)
         if obs is None:
             print(f"[!] Reset failed for task '{current_task}', skipping.")
             continue

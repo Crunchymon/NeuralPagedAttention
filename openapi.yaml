@@ -8,7 +8,8 @@ paths:
       tags:
       - simulation
       summary: List available agents
-      description: Returns a list of all supported reinforcement learning and heuristic agents, along with instructions on how to use them.
+      description: Returns a list of all supported reinforcement learning and heuristic
+        agents, along with instructions on how to use them.
       operationId: get_agents_api_agents_get
       responses:
         '200':
@@ -21,7 +22,8 @@ paths:
       tags:
       - configuration
       summary: Get environment constants
-      description: Returns the current dynamic environment constants and their original default values.
+      description: Returns the current dynamic environment constants and their original
+        default values.
       operationId: get_settings_api_settings_get
       responses:
         '200':
@@ -33,14 +35,15 @@ paths:
       tags:
       - configuration
       summary: Update environment constants
-      description: Update GPU_TOTAL_BLOCKS, CPU_TOTAL_BLOCKS, TOKENS_PER_BLOCK, max_queue_size, and max_ticks for tasks.
+      description: Update GPU_TOTAL_BLOCKS, CPU_TOTAL_BLOCKS, TOKENS_PER_BLOCK, and
+        max_ticks for tasks.
       operationId: update_settings_api_settings_post
       requestBody:
-        required: true
         content:
           application/json:
             schema:
               $ref: '#/components/schemas/SettingsRequest'
+        required: true
       responses:
         '200':
           description: Successful Response
@@ -58,46 +61,26 @@ paths:
       tags:
       - simulation
       summary: Run a full batch simulation
-      description: Triggers a headless background simulation of the Neural PagedAttention environment using the specified agent policy.
+      description: "Triggers a headless background simulation of the Neural PagedAttention\
+        \ environment using the specified agent policy.\n    \n    This endpoint executes\
+        \ the entire episode(s) and returns a comprehensive telemetry package containing:\n\
+        \    - `session_logs`: High-level episodic summaries including normalized\
+        \ scores and crash flags.\n    - `tick_logs`: Granular, tick-by-tick telemetry\
+        \ including rewards, actions, and 20-dimensional observation vectors.\n  \
+        \  \n    Multiple simulations can be requested concurrently without interference."
       operationId: run_simulation_endpoint_api_simulate_post
       requestBody:
-        required: true
         content:
           application/json:
             schema:
               $ref: '#/components/schemas/SimulationRequest'
+        required: true
       responses:
         '200':
           description: Successful Response
           content:
             application/json:
               schema: {}
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /api/simulate-all:
-    post:
-      tags:
-      - simulation
-      summary: Run all agents and tasks with shared seeded traffic
-      description: Applies runtime configuration, generates one deterministic traffic trace per task from the provided seed, runs every selected agent, and returns combined tick and session telemetry.
-      operationId: run_all_simulations_api_simulate_all_post
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/BatchSimulationRequest'
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BatchSimulationResponse'
         '422':
           description: Validation Error
           content:
@@ -112,11 +95,12 @@ paths:
       description: '**Deprecated.** Use ``POST /sessions/{session_id}/reset`` instead.'
       operationId: legacy_reset_reset_post
       requestBody:
-        required: false
         content:
           application/json:
             schema:
               $ref: '#/components/schemas/_LegacyResetRequest'
+              default:
+                task: easy
       responses:
         '200':
           description: Successful Response
@@ -138,11 +122,11 @@ paths:
       description: '**Deprecated.** Use ``POST /sessions/{session_id}/step`` instead.'
       operationId: legacy_step_step_post
       requestBody:
-        required: true
         content:
           application/json:
             schema:
               $ref: '#/components/schemas/_LegacyStepRequest'
+        required: true
       responses:
         '200':
           description: Successful Response
@@ -173,230 +157,121 @@ paths:
 components:
   schemas:
     HTTPValidationError:
-      type: object
-      title: HTTPValidationError
       properties:
         detail:
-          type: array
-          title: Detail
           items:
             $ref: '#/components/schemas/ValidationError'
+          type: array
+          title: Detail
+      type: object
+      title: HTTPValidationError
     SettingsRequest:
+      properties:
+        gpu_total_blocks:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Gpu Total Blocks
+        cpu_total_blocks:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Cpu Total Blocks
+        tokens_per_block:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Tokens Per Block
+        max_ticks_easy:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Max Ticks Easy
+        max_ticks_medium:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Max Ticks Medium
+        max_ticks_hard:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Max Ticks Hard
       type: object
       title: SettingsRequest
-      properties:
-        gpu_total_blocks:
-          anyOf:
-          - type: integer
-          - type: 'null'
-        cpu_total_blocks:
-          anyOf:
-          - type: integer
-          - type: 'null'
-        tokens_per_block:
-          anyOf:
-          - type: integer
-          - type: 'null'
-        max_queue_size:
-          anyOf:
-          - type: integer
-          - type: 'null'
-        max_ticks_easy:
-          anyOf:
-          - type: integer
-          - type: 'null'
-        max_ticks_medium:
-          anyOf:
-          - type: integer
-          - type: 'null'
-        max_ticks_hard:
-          anyOf:
-          - type: integer
-          - type: 'null'
-    BatchSimulationRequest:
-      type: object
-      title: BatchSimulationRequest
-      required:
-      - seed
-      properties:
-        gpu_total_blocks:
-          anyOf:
-          - type: integer
-          - type: 'null'
-        cpu_total_blocks:
-          anyOf:
-          - type: integer
-          - type: 'null'
-        tokens_per_block:
-          anyOf:
-          - type: integer
-          - type: 'null'
-        max_queue_size:
-          anyOf:
-          - type: integer
-          - type: 'null'
-        max_ticks_easy:
-          anyOf:
-          - type: integer
-          - type: 'null'
-        max_ticks_medium:
-          anyOf:
-          - type: integer
-          - type: 'null'
-        max_ticks_hard:
-          anyOf:
-          - type: integer
-          - type: 'null'
-        seed:
-          type: integer
-          minimum: 0
-        agents:
-          anyOf:
-          - type: array
-            items:
-              type: string
-          - type: 'null'
-        tasks:
-          anyOf:
-          - type: array
-            items:
-              type: string
-              enum:
-              - easy
-              - medium
-              - hard
-          - type: 'null'
-        include_tick_logs:
-          type: boolean
-          default: true
-    BatchSimulationResponse:
-      type: object
-      title: BatchSimulationResponse
-      required:
-      - status
-      - seed
-      - applied_config
-      - tasks
-      - agents
-      - all_session_logs
-      properties:
-        status:
-          type: string
-        seed:
-          type: integer
-        applied_config:
-          type: object
-          additionalProperties: true
-        tasks:
-          type: array
-          items:
-            type: string
-        agents:
-          type: array
-          items:
-            type: string
-        results_by_task:
-          type: object
-          additionalProperties: true
-        all_session_logs:
-          type: array
-          items:
-            $ref: '#/components/schemas/SimulationRunSummary'
-        all_tick_logs:
-          type: array
-          items:
-            type: object
-            additionalProperties: true
-    SimulationRunSummary:
-      type: object
-      title: SimulationRunSummary
-      required:
-      - agent
-      - task
-      - session_id
-      - ticks_run
-      - total_reward
-      - final_score
-      - total_arrived
-      - total_completed
-      - crashed
-      properties:
-        agent:
-          type: string
-        task:
-          type: string
-        session_id:
-          type: string
-        ticks_run:
-          type: integer
-        total_reward:
-          type: number
-        final_score:
-          type: number
-        total_arrived:
-          type: integer
-        total_completed:
-          type: integer
-        crashed:
-          type: boolean
     SimulationRequest:
-      type: object
-      title: SimulationRequest
-      required:
-      - agent
       properties:
         agent:
           type: string
-          description: The name of the agent to run. Must be either 'lru', 'random', 'qlearning', 'neural', or 'llm'.
+          title: Agent
+          description: The name of the agent to run. Must be either 'lru', 'random',
+            'qlearning', or 'neural'.
         task:
           anyOf:
           - type: string
           - type: 'null'
+          title: Task
+          description: 'The task difficulty to simulate. Options: ''easy'', ''medium'',
+            ''hard''. If omitted, all tasks will be run sequentially.'
         ticks:
           anyOf:
           - type: integer
           - type: 'null'
-    ValidationError:
+          title: Ticks
+          description: Optional override for the maximum number of ticks to run for
+            the simulation. If omitted, default task duration is used.
       type: object
-      title: ValidationError
       required:
-      - loc
-      - msg
-      - type
+      - agent
+      title: SimulationRequest
+    ValidationError:
       properties:
         loc:
-          type: array
           items:
             anyOf:
             - type: string
             - type: integer
+          type: array
+          title: Location
         msg:
           type: string
+          title: Message
         type:
           type: string
+          title: Error Type
         input:
           title: Input
         ctx:
           type: object
           title: Context
-    _LegacyResetRequest:
       type: object
-      title: _LegacyResetRequest
+      required:
+      - loc
+      - msg
+      - type
+      title: ValidationError
+    _LegacyResetRequest:
       properties:
         task:
           anyOf:
           - type: string
           - type: 'null'
+          title: Task
           default: easy
-    _LegacyStepRequest:
       type: object
-      title: _LegacyStepRequest
+      title: _LegacyResetRequest
+    _LegacyStepRequest:
       properties:
         action:
           anyOf:
           - type: integer
           - type: 'null'
+          title: Action
         action_id:
           anyOf:
           - type: integer
           - type: 'null'
+          title: Action Id
+      type: object
+      title: _LegacyStepRequest
+
