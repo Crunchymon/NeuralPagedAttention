@@ -113,7 +113,8 @@ def main():
                     do_sample=True, 
                     top_p=0.9, 
                     temperature=0.7, 
-                    pad_token_id=tokenizer.eos_token_id
+                    pad_token_id=tokenizer.eos_token_id,
+                    use_cache=False
                 )
             
             # Clone to detach from no_grad/inference mode so Autograd doesn't complain during backprop
@@ -141,8 +142,8 @@ def main():
             
             # --- PHASE 3: Policy Gradient Update (WITH Gradients) ---
             if len(response_ids) > 0:
-                # Forward pass on the full sequence to get logits
-                outputs = model(output_ids)
+                # Forward pass on the full sequence to get logits (disable cache for training)
+                outputs = model(output_ids, use_cache=False)
                 
                 # Logits shifted by 1 to align with labels
                 # We want the logits that predict the response_ids
