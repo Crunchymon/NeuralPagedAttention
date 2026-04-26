@@ -40,7 +40,7 @@ from agents.LLMAgent.prompts import SYSTEM_PROMPT, build_user_prompt
 # Constants
 # ---------------------------------------------------------------------------
 
-MODEL_NAME       = "Qwen/Qwen2.5-3B-Instruct"
+MODEL_NAME       = "Qwen/Qwen2.5-1.5B-Instruct"
 MAX_NEW_TOKENS   = 8      # LLM only needs to output one 1-2 digit number
 FALLBACK_TIMEOUT = 10.0   # seconds — fall back to heuristic if inference takes longer
 VALID_ACTIONS    = set(range(18))
@@ -135,6 +135,7 @@ class LLMAgent:
         self.parse_failures = 0
 
         # ── Device detection ──────────────────────────────────────────────
+        self.use_mlx = False
         if torch.cuda.is_available():
             self.device = "cuda"
             dtype       = torch.bfloat16
@@ -143,10 +144,11 @@ class LLMAgent:
             print(f"[*] LLMAgent: CUDA detected — loading in bfloat16 on {torch.cuda.get_device_name(0)}")
         elif torch.backends.mps.is_available():
             self.device    = "mps"
+            self.use_mlx   = True
             dtype          = torch.float16
             quant_cfg      = None
             use_device_map = False   # MPS does NOT support device_map="auto"
-            print("[*] LLMAgent: Apple MPS detected — loading in float16")
+            print("[*] LLMAgent: Apple MPS detected — loading via MLX for maximum speed")
         else:
             self.device    = "cpu"
             dtype          = None    # bitsandbytes handles dtype
@@ -159,33 +161,38 @@ class LLMAgent:
             use_device_map = True    # accelerate needed for 4-bit on CPU
             print("[*] LLMAgent: No GPU detected — loading in 4-bit NF4 (CPU mode)")
 
-        # ── Tokenizer ─────────────────────────────────────────────────────
-        print(f"[*] Loading tokenizer: {model_name}")
-        self.tokenizer = AutoTokenizer.from_pretrained(
-            model_name,
-            trust_remote_code=True,
-        )
+        # ── Load Model & Tokenizer ─────────────────────────────────────────
+        if self.use_mlx:
+            import mlx_lm
+            print(f"[*] Loading model and tokenizer via mlx_lm: {model_name} (this may take a minute...)")
+            self.model, self.tokenizer = mlx_lm.load(model_name)
+            print("[*] LLMAgent: MLX Model ready.\n")
+        else:
+            print(f"[*] Loading tokenizer: {model_name}")
+            self.tokenizer = AutoTokenizer.from_pretrained(
+                model_name,
+                trust_remote_code=True,
+            )
 
-        # ── Model ─────────────────────────────────────────────────────────
-        print(f"[*] Loading model: {model_name}  (this may take a minute on first run...)")
-        load_kwargs: dict = {"trust_remote_code": True}
+            print(f"[*] Loading model: {model_name}  (this may take a minute on first run...)")
+            load_kwargs: dict = {"trust_remote_code": True}
 
-        if quant_cfg is not None:
-            load_kwargs["quantization_config"] = quant_cfg
-        elif dtype is not None:
-            load_kwargs["dtype"] = dtype  # use 'dtype' not deprecated 'torch_dtype'
+            if quant_cfg is not None:
+                load_kwargs["quantization_config"] = quant_cfg
+            elif dtype is not None:
+                load_kwargs["dtype"] = dtype  # use 'dtype' not deprecated 'torch_dtype'
 
-        if use_device_map:
-            load_kwargs["device_map"] = "auto"
+            if use_device_map:
+                load_kwargs["device_map"] = "auto"
 
-        self.model = AutoModelForCausalLM.from_pretrained(model_name, **load_kwargs)
+            self.model = AutoModelForCausalLM.from_pretrained(model_name, **load_kwargs)
 
-        # MPS: move the model to the Apple GPU after loading on CPU
-        if not use_device_map and self.device != "cpu":
-            self.model = self.model.to(self.device)
+            # MPS fallback if MLX is missing, though we intercept it above
+            if not use_device_map and self.device != "cpu":
+                self.model = self.model.to(self.device)
 
-        self.model.eval()
-        print("[*] LLMAgent: Model ready.\n")
+            self.model.eval()
+            print("[*] LLMAgent: PyTorch Model ready.\n")
 
     # ── Public interface ──────────────────────────────────────────────────
 
@@ -214,25 +221,42 @@ class LLMAgent:
         ]
 
         # Apply the chat template (Qwen uses a custom template)
-        text = self.tokenizer.apply_chat_template(
-            messages,
-            tokenize=False,
-            add_generation_prompt=True,
-        )
-        inputs = self.tokenizer(text, return_tensors="pt").to(self.model.device)
+        if hasattr(self.tokenizer, "apply_chat_template"):
+            text = self.tokenizer.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=True,
+            )
+        else:
+            text = f"{SYSTEM_PROMPT}\n\n{user_msg}"
 
         t_start = time.time()
         try:
-            with torch.inference_mode():
-                output_ids = self.model.generate(
-                    **inputs,
-                    max_new_tokens=MAX_NEW_TOKENS,
-                    do_sample=False,        # greedy — deterministic & fastest
-                    temperature=None,       # ignored when do_sample=False
-                    top_p=None,             # ignored when do_sample=False
-                    use_cache=True,         # reuse KV cache across generate steps
-                    pad_token_id=self.tokenizer.eos_token_id,
-                )
+            if getattr(self, "use_mlx", False):
+                import mlx_lm
+                response = mlx_lm.generate(
+                    self.model,
+                    self.tokenizer,
+                    prompt=text,
+                    max_tokens=MAX_NEW_TOKENS,
+                    verbose=False
+                ).strip()
+            else:
+                inputs = self.tokenizer(text, return_tensors="pt").to(self.model.device)
+                with torch.inference_mode():
+                    output_ids = self.model.generate(
+                        **inputs,
+                        max_new_tokens=MAX_NEW_TOKENS,
+                        do_sample=False,        # greedy — deterministic & fastest
+                        temperature=None,       # ignored when do_sample=False
+                        top_p=None,             # ignored when do_sample=False
+                        use_cache=True,         # reuse KV cache across generate steps
+                        pad_token_id=self.tokenizer.eos_token_id,
+                        max_length=None,        # suppress max_length vs max_new_tokens warning
+                    )
+                # Decode only the new tokens (skip prompt)
+                new_ids  = output_ids[0][inputs["input_ids"].shape[1]:]
+                response = self.tokenizer.decode(new_ids, skip_special_tokens=True).strip()
         except Exception as exc:
             print(f"[!] LLM generate error at tick {tick}: {exc} — using heuristic")
             self.parse_failures += 1
@@ -240,19 +264,13 @@ class LLMAgent:
 
         elapsed = time.time() - t_start
 
-        # Decode only the new tokens (skip prompt)
-        new_ids  = output_ids[0][inputs["input_ids"].shape[1]:]
-        response = self.tokenizer.decode(new_ids, skip_special_tokens=True).strip()
-
         action = self._parse_action(response)
         if action is None:
             self.parse_failures += 1
             action = self._heuristic_fallback(obs)
-            if tick % 50 == 0:  # limit log noise
-                print(f"[!] Tick {tick}: parse failed ('{response}') → heuristic {action}  [{elapsed:.1f}s]")
+            print(f"[!] Tick {tick}: parse failed ('{response}') → heuristic {action}  [{elapsed:.1f}s]")
         else:
-            if tick % 50 == 0:
-                print(f"[*] Tick {tick}: LLM → action {action} ({ACTION_MAP.get(action)})  [{elapsed:.1f}s]")
+            print(f"[*] Tick {tick}: LLM → action {action} ({ACTION_MAP.get(action)})  [{elapsed:.1f}s]")
 
         return action
 
@@ -364,7 +382,7 @@ def run_sim(task: str | None = None, ticks: int | None = None) -> tuple[list, li
     agent = LLMAgent()
 
     print("\n" + "=" * 60)
-    print("  LLM AGENT (Qwen2.5-3B-Instruct) SIMULATION")
+    print("  LLM AGENT (Qwen2.5-1.5B-Instruct) SIMULATION")
     print("=" * 60 + "\n")
 
     # Observation keys must match KVCacheObservation.to_array() order
@@ -438,14 +456,13 @@ def run_sim(task: str | None = None, ticks: int | None = None) -> tuple[list, li
             }
             logs.append(log_entry)
 
-            if ticks_run % 20 == 0 or done:
-                print(
-                    f"[{current_task.upper()} T{ticks_run:4}] "
-                    f"{action_name:35} | "
-                    f"R {reward:+7.2f} | "
-                    f"Total {total_reward:9.2f} | "
-                    f"GPU {obs[0]:.2f}"
-                )
+            print(
+                f"[{current_task.upper()} T{ticks_run:4}] "
+                f"{action_name:35} | "
+                f"R {reward:+7.2f} | "
+                f"Total {total_reward:9.2f} | "
+                f"GPU {obs[0]:.2f}"
+            )
 
         # ── Session summary ───────────────────────────────────────────
         final_score = compute_final_score(

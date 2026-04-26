@@ -12,3 +12,7 @@ accelerate>=0.24.1
 gradio>=4.36.1
 pandas>=2.0.0
 openenv-core>=0.2.3
+mlx>=0.14.0
+mlx-lm>=0.14.0
+trl>=0.8.0
+peft>=0.10.0
