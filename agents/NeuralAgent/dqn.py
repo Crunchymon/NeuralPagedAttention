@@ -208,7 +208,7 @@ class DQNAgent:
     def load(self, filepath: str) -> bool:
         if not os.path.exists(filepath):
             return False
-        ckpt = torch.load(filepath, map_location=self.device)
+        ckpt = torch.load(filepath, map_location=self.device, weights_only=False)
         if isinstance(ckpt, dict) and "policy" in ckpt:
             self.policy_net.load_state_dict(ckpt["policy"])
             if "target" in ckpt:
