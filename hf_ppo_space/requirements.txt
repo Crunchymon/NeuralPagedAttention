@@ -1,0 +1,19 @@
+# PPO multi-GPU DDP runtime for the Hugging Face Space (4x Nvidia L4).
+# torch is provided by the pytorch/pytorch:2.4.1-cuda12.4-cudnn9-devel base image.
+
+transformers>=4.45.0,<5.0.0
+accelerate>=0.34.0,<1.0.0
+peft>=0.13.0,<1.0.0
+bitsandbytes>=0.43.0
+sentencepiece>=0.2.0
+protobuf>=3.20.0
+safetensors>=0.4.3
+
+# Hub + Space UI
+huggingface_hub>=0.24.0
+hf_transfer>=0.1.6
+gradio>=4.36.0
+
+# Repo runtime deps (mirrors hf_train_space/requirements.txt)
+numpy>=1.26.0
+pydantic>=2.7.0

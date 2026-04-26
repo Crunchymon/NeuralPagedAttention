@@ -5,6 +5,7 @@ This agent will look for the `ppo_lora_agent` adapter saved by `train_ppo.py`.
 If it finds the adapter, it loads it (using MLX if on Mac, or HuggingFace PEFT on CUDA).
 """
 
+import json
 import os
 import re
 import sys
@@ -19,10 +20,29 @@ from server.env_components.scoring import compute_final_score
 from agents.LLMAgent.prompts import SYSTEM_PROMPT, build_user_prompt
 from agents.LLMAgent.llm import LocalEnv
 
-MODEL_NAME = "Qwen/Qwen2.5-1.5B-Instruct"
+DEFAULT_MODEL_NAME = "Qwen/Qwen2.5-1.5B-Instruct"
 ADAPTER_PATH = os.path.join(os.path.dirname(__file__), "ppo_lora_agent")
 MAX_NEW_TOKENS = 8
 VALID_ACTIONS = set(range(18))
+
+
+def _resolve_base_model_name() -> str:
+    """Read base model from the adapter's config so a 1.5B/3B/7B/14B-trained adapter
+    auto-selects its correct base. Falls back to DEFAULT_MODEL_NAME if missing."""
+    cfg_path = os.path.join(ADAPTER_PATH, "adapter_config.json")
+    if os.path.exists(cfg_path):
+        try:
+            with open(cfg_path, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+            base = cfg.get("base_model_name_or_path")
+            if isinstance(base, str) and base.strip():
+                return base.strip()
+        except Exception as exc:
+            print(f"[!] Could not parse {cfg_path}: {exc}")
+    return DEFAULT_MODEL_NAME
+
+
+MODEL_NAME = _resolve_base_model_name()
 
 class PPOAgent:
     def __init__(self) -> None:
