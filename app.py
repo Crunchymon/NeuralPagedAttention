@@ -15,6 +15,7 @@ from agents.RandomAgent.run_random_agent import run_simulation as run_random
 from agents.QLearningAgent.QAgent import run_sim as run_qlearning
 from agents.NeuralAgent.dqn import run_sim as run_dqn
 from agents.LLMAgent.llm import run_sim as run_llm
+from agents.UnslothPPOAgent.ppo_agent import run_sim as run_ppo
 
 import server.env_components.constants as constants
 
@@ -29,7 +30,7 @@ app.add_middleware(
 )
 
 class SimulationRequest(BaseModel):
-    agent: str = Field(..., description="The name of the agent to run. Must be either 'lru', 'random', 'qlearning', or 'neural'.")
+    agent: str = Field(..., description="The name of the agent to run. Must be either 'lru', 'random', 'qlearning', 'neural', 'llm', or 'ppo'.")
     task: Optional[str] = Field(None, description="The task difficulty to simulate. Options: 'easy', 'medium', 'hard'. If omitted, all tasks will be run sequentially.")
     ticks: Optional[int] = Field(None, description="Optional override for the maximum number of ticks to run for the simulation. If omitted, default task duration is used.")
 
@@ -55,7 +56,8 @@ def get_agents():
             {"id": "random", "name": "Random Agent", "description": "Baseline agent that selects actions entirely at random."},
             {"id": "qlearning", "name": "Tabular Q-Learning Agent", "description": "RL agent using a discretized state-space Q-table."},
             {"id": "neural",    "name": "Deep Q-Network (DQN) Agent", "description": "RL agent using a PyTorch neural network to map continuous states to Q-values."},
-            {"id": "llm",       "name": "Qwen2.5-3B LLM Agent",       "description": "Locally-running Qwen2.5-3B-Instruct model that chooses actions from natural-language prompts. Auto-quantized (4-bit on CPU, bfloat16 on GPU)."}
+            {"id": "llm",       "name": "Qwen2.5-3B LLM Agent",       "description": "Locally-running Qwen2.5-3B-Instruct model that chooses actions from natural-language prompts. Auto-quantized (4-bit on CPU, bfloat16 on GPU)."},
+            {"id": "ppo",       "name": "Unsloth PPO Agent (RLHF)",   "description": "Fine-tuned Qwen2.5 LLM with REINFORCE policy gradient (LoRA adapter) via MLX for fast cached-policy execution."}
         ],
         "usage": {
             "endpoint": "POST /api/simulate",
@@ -159,8 +161,10 @@ def run_simulation_endpoint(req: SimulationRequest):
             tick_logs, session_logs = run_dqn(task=req.task, ticks=req.ticks)
         elif agent_type == "llm":
             tick_logs, session_logs = run_llm(task=req.task, ticks=req.ticks)
+        elif agent_type == "ppo":
+            tick_logs, session_logs = run_ppo(task=req.task, ticks=req.ticks)
         else:
-            raise HTTPException(status_code=400, detail=f"Unknown agent type: {req.agent}. Supported: 'lru', 'random', 'qlearning', 'neural', 'llm'.")
+            raise HTTPException(status_code=400, detail=f"Unknown agent type: {req.agent}. Supported: 'lru', 'random', 'qlearning', 'neural', 'llm', 'ppo'.")
             
         return {
             "status": "success",
