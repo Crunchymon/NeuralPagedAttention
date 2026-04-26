@@ -165,14 +165,13 @@ def train_offline():
     print(" NEURAL NETWORK AGENT (DQN) OFFLINE TRAINING")
     print("="*60 + "\n")
     
-    TRAINING_EPISODES = 50
+    TRAINING_EPISODES = 100
     for episode in range(TRAINING_EPISODES):
         current_task = random.choice(["easy", "medium", "hard"])
         obs = env.reset(current_task)
         if obs is None: continue
         
-        env.env.config["max_ticks"] = 500  # Cap at 500 for faster RL cycles
-        
+        # Using full length episodes (2000-5000 ticks) for deeper training
         total_reward = 0
         ticks_run = 0
         done = False
